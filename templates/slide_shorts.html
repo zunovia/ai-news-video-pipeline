@@ -5,22 +5,9 @@
 <meta name="viewport" content="width=1080, height=1920">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  width: 1080px;
-  height: 1920px;
-  font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif;
-  overflow: hidden;
-}
+body { width: 1080px; height: 1920px; font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; overflow: hidden; }
+.slide { width: 1080px; height: 1920px; position: relative; display: flex; flex-direction: column; }
 
-.slide {
-  width: 1080px;
-  height: 1920px;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-}
-
-/* --- Day-of-week theme colors --- */
 .day-mon { --day-grad-start: #1565c0; --day-grad-end: #42a5f5; --day-accent: #1976d2; }
 .day-tue { --day-grad-start: #2e7d32; --day-grad-end: #66bb6a; --day-accent: #388e3c; }
 .day-wed { --day-grad-start: #00695c; --day-grad-end: #4db6ac; --day-accent: #00796b; }
@@ -29,225 +16,162 @@ body {
 .day-sat { --day-grad-start: #6a1b9a; --day-grad-end: #ab47bc; --day-accent: #7b1fa2; }
 .day-sun { --day-grad-start: #c62828; --day-grad-end: #ef5350; --day-accent: #d32f2f; }
 
-/* --- Opening --- */
-.slide--opening {
-  background: linear-gradient(135deg, var(--day-grad-start, #667eea) 0%, var(--day-grad-end, #764ba2) 100%);
-  justify-content: center;
-  align-items: center;
-  text-align: center;
-  color: white;
-}
-.slide--opening .ponte-img-large {
-  width: 360px;
-  height: auto;
-  margin-bottom: 40px;
-}
-.slide--opening .logo { font-size: 120px; margin-bottom: 40px; }
-.slide--opening .channel-name { font-size: 80px; font-weight: 900; margin-bottom: 24px; }
-.slide--opening .tagline { font-size: 44px; opacity: 0.9; }
-.slide--opening .date { font-size: 56px; font-weight: 700; opacity: 1.0; margin-top: 48px; }
-
-/* --- Ending --- */
-.slide--ending {
-  background: linear-gradient(135deg, var(--day-grad-start, #667eea) 0%, var(--day-grad-end, #764ba2) 100%);
-  justify-content: center;
-  align-items: center;
-  text-align: center;
-  color: white;
-}
-.slide--ending .ponte-img-large {
-  width: 320px;
-  height: auto;
-  margin-bottom: 40px;
-}
-.slide--ending .logo { font-size: 120px; margin-bottom: 40px; }
-.slide--ending .message { font-size: 64px; font-weight: 700; }
-.slide--ending .sub { font-size: 40px; opacity: 0.8; margin-top: 24px; }
-
-/* --- News slide --- */
-.slide--news {
-  background: linear-gradient(180deg, #f0f4ff 0%, #ffffff 100%);
-}
-/* Light tinted backgrounds per article */
-.slide--news.bg-1 { background: linear-gradient(180deg, color-mix(in srgb, var(--day-grad-end, #667eea) 12%, white) 0%, #ffffff 100%); }
-.slide--news.bg-2 { background: linear-gradient(180deg, color-mix(in srgb, var(--day-grad-end, #667eea) 18%, white) 0%, #ffffff 100%); }
-.slide--news.bg-3 { background: linear-gradient(180deg, color-mix(in srgb, var(--day-grad-end, #667eea) 12%, white) 0%, #ffffff 100%); }
-.slide--news.bg-4 { background: linear-gradient(180deg, color-mix(in srgb, var(--day-grad-end, #667eea) 18%, white) 0%, #ffffff 100%); }
-.slide--news.bg-5 { background: linear-gradient(180deg, color-mix(in srgb, var(--day-grad-end, #667eea) 12%, white) 0%, #ffffff 100%); }
-
-.slide--news .header {
-  background: linear-gradient(90deg, var(--day-grad-start, #667eea), var(--day-grad-end, #764ba2));
-  color: white;
-  padding: 36px 48px;
-  font-size: 32px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-shrink: 0;
+.slide {
+  --ink: #1d2733;
+  --paper: #f4f7fb;
+  --card: #ffffff;
+  --accent: var(--day-accent, #1976d2);
+  --accent-soft: color-mix(in srgb, var(--day-accent, #1976d2) 12%, #ffffff);
+  --marker: color-mix(in srgb, var(--day-grad-end, #42a5f5) 28%, #ffe27a);
 }
 
-.slide--news .header .news-number {
-  background: rgba(255,255,255,0.3);
-  border-radius: 50%;
-  width: 60px;
-  height: 60px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 36px;
-  font-weight: 900;
-  flex-shrink: 0;
+/* ============ 共通背景（ライト＋日替わりアクセント） ============ */
+.slide--news, .slide--keyword {
+  background-color: var(--paper);
+  background-image:
+    radial-gradient(circle at 8% 4%, color-mix(in srgb, var(--day-grad-start,#1565c0) 16%, transparent), transparent 34%),
+    radial-gradient(circle at 96% 96%, color-mix(in srgb, var(--day-grad-end,#42a5f5) 14%, transparent), transparent 30%),
+    radial-gradient(color-mix(in srgb, var(--day-accent,#1976d2) 9%, transparent) 2.4px, transparent 2.4px);
+  background-size: 100% 100%, 100% 100%, 56px 56px;
 }
 
-/* OG image area - top section */
-.slide--news .og-image-area {
-  width: 100%;
-  height: 680px;
-  flex-shrink: 0;
-  overflow: hidden;
-  background: #f5f5f5;
+/* ============ トップバー ============
+   Shorts上部UI（Shortsロゴ・検索 ~140px）とKen Burnsクロップ（~46px）を避けるため、
+   バーは全面に伸ばしつつ文字は下寄せでセーフゾーン（y≈190以降）に置く */
+.topbar {
+  flex-shrink: 0; height: 250px; display: flex; align-items: flex-end; gap: 24px;
+  padding: 0 48px 26px;
+  background: linear-gradient(100deg, var(--day-grad-start,#1565c0), var(--day-grad-end,#42a5f5));
+  color: #fff; box-shadow: 0 6px 18px rgba(0,0,0,.18);
 }
-.slide--news .og-img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
+.topbar .live-dot { width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 8px rgba(255,255,255,.25); flex-shrink: 0; }
+.topbar .topbar-title { font-size: 42px; font-weight: 700; letter-spacing: .04em; }
+.topbar .topbar-date { margin-left: auto; font-size: 32px; font-weight: 500; opacity: .95; }
+
+/* ============ OG画像カード ============ */
+.hero {
+  margin: 32px 48px 0; flex-shrink: 0; position: relative;
+  border-radius: 28px; overflow: hidden; background: #e6ebf2;
+  box-shadow: 0 16px 40px rgba(29,39,51,.20);
+}
+.hero .hero-img { width: 100%; height: 460px; object-fit: cover; display: block; }
+.hero .source-chip {
+  position: absolute; right: 20px; bottom: 20px;
+  background: rgba(20,28,38,.82); color: #fff; border-radius: 999px;
+  padding: 10px 28px; font-size: 27px; font-weight: 600; letter-spacing: .02em;
+  backdrop-filter: blur(2px);
 }
 
-/* Content area */
-.slide--news .content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 36px 48px;
-  gap: 24px;
-  min-height: 0;
-}
-.slide--news .title {
-  font-size: 52px;
-  font-weight: 900;
-  color: #1a1a2e;
-  line-height: 1.4;
-}
-.slide--news .bubble {
-  background: #fff;
-  border-radius: 24px;
-  padding: 28px 36px;
-  position: relative;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
-  font-size: 34px;
-  color: #333;
-  line-height: 1.7;
-}
-.slide--news .bubble::after {
-  content: "";
-  position: absolute;
-  bottom: -16px;
-  left: 50%;
-  transform: translateX(-50%);
-  border: 12px solid transparent;
-  border-top-color: #fff;
+/* ============ 本文エリア ============ */
+/* 下420pxはShorts UI（タイトル・ボタン列）＋クロップ帯のため本文を置かない */
+.body-area { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; gap: 32px; padding: 24px 48px 430px; position: relative; }
+
+/* 見出し（intro側） */
+.headline {
+  font-size: 58px; font-weight: 700; color: var(--ink); line-height: 1.62;
+  display: inline; box-decoration-break: clone; -webkit-box-decoration-break: clone;
+  background: linear-gradient(transparent 68%, var(--marker) 68%, var(--marker) 94%, transparent 94%);
+  padding: 0 6px;
 }
 
-/* Ponte at bottom */
-.slide--news .ponte-bottom {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px 0 24px;
-  flex-shrink: 0;
+/* ポンテ＋セリフの対話行（コメンテーター配置） */
+.dialog { display: flex; align-items: flex-end; gap: 20px; }
+.dialog .ponte-img { width: 210px; height: auto; flex-shrink: 0; filter: drop-shadow(0 10px 20px rgba(29,39,51,.22)); }
+.dialog .serif-card { flex: 1; min-width: 0; }
+.slide--point .serif-card { font-size: 41px; line-height: 1.68; }
+/* 長文セリフはフォントを段階的に縮めてカードを下部セーフゾーン内に収める */
+.serif-card.serif-long   { font-size: 37px; line-height: 1.62; padding: 36px 40px; }
+.serif-card.serif-xlong  { font-size: 34px; line-height: 1.58; padding: 32px 36px; }
+.serif-card.serif-xxlong { font-size: 30px; line-height: 1.55; padding: 28px 32px; }  /* LLMが文字数規則を逸脱した時の保険 */
+.serif-card { overflow-wrap: anywhere; }
+
+/* ============ ポイントスライド ============
+   intro側と文脈をつなぐ「トピック帯」（サムネ＋見出し）を上に置き、
+   その下にバッジ＋対話を配置して縦の空白をなくす */
+.slide--point .body-area { justify-content: flex-start; padding-top: 40px; gap: 36px; }
+.topic-strip {
+  display: flex; align-items: center; gap: 28px;
+  background: var(--card); border-radius: 26px; padding: 22px 26px;
+  box-shadow: 0 10px 28px rgba(29,39,51,.10);
 }
-.slide--news .ponte-bottom .ponte-img {
-  max-width: 160px;
-  max-height: 180px;
+.topic-strip .topic-thumb {
+  width: 176px; height: 176px; flex-shrink: 0; border-radius: 20px; object-fit: cover;
+  background: #e6ebf2; display: block;
+}
+.topic-strip .topic-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.topic-strip .topic-kicker {
+  font-size: 24px; font-weight: 700; letter-spacing: .08em; color: var(--accent);
+}
+.topic-strip .topic-title {
+  font-size: 35px; font-weight: 700; color: var(--ink); line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.topic-strip .topic-title rt { font-size: 0.38em; }
+
+.point-badge {
+  align-self: flex-start; display: flex; align-items: center; gap: 18px;
+  background: linear-gradient(120deg, var(--day-grad-start,#1565c0), var(--day-grad-end,#42a5f5));
+  color: #fff; border-radius: 999px; padding: 18px 44px;
+  font-size: 48px; font-weight: 700; letter-spacing: .04em;
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--day-accent,#1976d2) 38%, transparent);
+  margin-top: 8px;
 }
 
-/* Footer */
-.footer {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 64px;
-  background: color-mix(in srgb, var(--day-accent, #667eea) 10%, white);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 48px;
-  font-size: 26px;
-  color: var(--day-accent, #667eea);
+/* セリフカード（吹き出し：左のポンテへ尻尾） */
+.serif-card {
+  position: relative; background: var(--card); border-radius: 26px;
+  border-left: 14px solid var(--accent);
+  padding: 42px 46px; font-size: 44px; color: var(--ink); line-height: 1.72;
+  box-shadow: 0 10px 30px rgba(29,39,51,.12);
+}
+.serif-card::before {
+  content: ""; position: absolute; left: -27px; bottom: 60px;
+  border: 14px solid transparent; border-right-color: var(--card);
+  filter: drop-shadow(-4px 4px 4px rgba(29,39,51,.05));
 }
 
-/* Ruby */
-ruby { ruby-position: over; }
-rt { font-size: 0.45em; font-weight: 400; color: inherit; }
-
-/* --- Keyword slide --- */
-.slide--keyword {
-  background: linear-gradient(135deg, #fff3cd 0%, #ffe0b2 100%);
-}
-.slide--keyword .keyword-header {
-  text-align: center;
-  padding: 56px 48px 32px;
-  font-size: 60px;
-  font-weight: 900;
-  color: #c62828;
-}
-.slide--keyword .keyword-body {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 0 48px 48px;
-  gap: 28px;
-}
-.slide--keyword .keyword-card {
-  background: rgba(255,255,255,0.85);
-  border-radius: 20px;
-  padding: 28px 36px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
-}
-.slide--keyword .keyword-term {
-  font-size: 42px;
-  font-weight: 800;
-  color: #c62828;
-}
-.slide--keyword .keyword-desc {
-  font-size: 34px;
-  color: #333;
-  line-height: 1.6;
+/* フッター（Shorts下部UI: タイトル帯~300px＋右ボタン列を避け、左寄せ・高め配置） */
+.brandline {
+  position: absolute; left: 0; right: 0; bottom: 350px; z-index: 2;
+  display: flex; justify-content: flex-start; padding: 0 52px;
+  font-size: 28px; font-weight: 600; color: color-mix(in srgb, var(--day-accent,#1976d2) 72%, #47566a);
 }
 
-/* Ponte placeholder */
-.ponte-placeholder {
-  width: 160px;
-  height: 160px;
-  background: linear-gradient(135deg, #a8edea, #fed6e3);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 80px;
+/* ルビ: 読みが親文字より長いときに親文字が字間伸長される（独 占）のを防ぐため
+   center 揃え＋ルビ単位の途中改行を禁止する */
+ruby { ruby-position: over; ruby-align: center; white-space: nowrap; }
+rt { font-size: 0.40em; font-weight: 400; color: inherit; opacity: .92; letter-spacing: 0; }
+
+/* ============ オープニング／エンディング（ダイジェスト用に温存） ============ */
+.slide--opening, .slide--ending {
+  background: linear-gradient(160deg, var(--day-grad-start,#1565c0), var(--day-grad-end,#42a5f5));
+  justify-content: center; align-items: center; text-align: center; padding: 60px; color: #fff;
 }
+.slide--opening .ponte-img-large, .slide--ending .ponte-img-large { width: 380px; height: auto; margin-bottom: 44px; filter: drop-shadow(0 10px 22px rgba(0,0,0,.35)); }
+.slide--opening .channel-name { font-size: 100px; font-weight: 700; margin-bottom: 28px; }
+.slide--opening .tagline { font-size: 46px; opacity: .95; }
+.slide--opening .date-big { font-size: 56px; margin-top: 52px; font-weight: 500; }
+.slide--ending .message { font-size: 92px; font-weight: 700; }
+.slide--ending .sub { font-size: 42px; opacity: .9; margin-top: 26px; }
+
+/* ============ キーワード（ダイジェスト用に温存） ============ */
+.slide--keyword .keyword-header { text-align: center; padding: 190px 48px 30px; font-size: 64px; font-weight: 700; color: var(--ink); }
+.slide--keyword .keyword-body { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 0 60px 430px; gap: 34px; }
+.slide--keyword .keyword-card { background: var(--card); border-radius: 22px; padding: 34px 40px; display: flex; flex-direction: column; gap: 16px; box-shadow: 0 10px 26px rgba(29,39,51,.10); }
+.slide--keyword .keyword-term { align-self: flex-start; font-size: 44px; font-weight: 700; color: #fff; background: linear-gradient(135deg, var(--day-grad-start,#1565c0), var(--day-grad-end,#42a5f5)); border-radius: 14px; padding: 10px 28px; }
+.slide--keyword .keyword-desc { font-size: 38px; color: var(--ink); line-height: 1.6; }
+
+.ponte-placeholder { width: 160px; height: 160px; background: linear-gradient(135deg,#a8edea,#fed6e3); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 80px; }
 </style>
 </head>
 <body>
 
 {% if slide_type == "opening" %}
 <div class="slide slide--opening {{ day_class }}">
-  {% if ponte_image %}
-  <img class="ponte-img-large" src="{{ ponte_image }}" alt="ポンテ">
-  {% else %}
-  <div class="logo">🤖</div>
-  {% endif %}
+  {% if ponte_image %}<img class="ponte-img-large" src="{{ ponte_image }}" alt="ポンテ">{% endif %}
   <div class="channel-name">{{ channel_name }}</div>
   <div class="tagline">{{ tagline }}</div>
-  <div class="date">{{ date }}</div>
+  <div class="date-big">{{ date }}</div>
 </div>
 
 {% elif slide_type == "keyword" %}
@@ -261,49 +185,49 @@ rt { font-size: 0.45em; font-weight: 400; color: inherit; }
     </div>
     {% endfor %}
   </div>
-  <div class="footer" style="background: rgba(198, 40, 40, 0.1); color: #c62828;">
-    <span>{{ channel_name }}</span>
-    <span>{{ date }}</span>
-  </div>
+  <div class="brandline">{{ channel_name }}</div>
 </div>
 
 {% elif slide_type == "ending" %}
 <div class="slide slide--ending {{ day_class }}">
-  {% if ponte_image %}
-  <img class="ponte-img-large" src="{{ ponte_image }}" alt="ポンテ">
-  {% else %}
-  <div class="logo">🤖</div>
-  {% endif %}
-  <div class="message">{{ ending_message | default("また明日ね！") }}</div>
+  {% if ponte_image %}<img class="ponte-img-large" src="{{ ponte_image }}" alt="ポンテ">{% endif %}
+  <div class="message">{{ ending_message }}</div>
   <div class="sub">チャンネル登録・いいね、よろしくね！</div>
 </div>
 
 {% else %}
-<div class="slide slide--news {{ bg_variant }} {{ day_class }}">
-  <div class="header">
-    <div class="news-number">{{ news_number }}</div>
-    <span>{{ header_label | default("TODAY'S AI NEWS") }}</span>
+{% set is_point = "のポイント" in title %}
+<div class="slide slide--news {% if is_point %}slide--point{% endif %} {{ bg_variant }} {{ day_class }}">
+  <div class="topbar">
+    <div class="live-dot"></div>
+    <span class="topbar-title">今日のAIニュース</span>
+    <span class="topbar-date">{{ date }}</span>
   </div>
-  {% if og_image %}
-  <div class="og-image-area">
-    <img class="og-img" src="{{ og_image }}" alt="記事画像">
+  {% if og_image and not is_point %}
+  <div class="hero">
+    <img class="hero-img" src="{{ og_image }}" alt="記事画像">
+    {% if source_label %}<span class="source-chip">{{ source_label }}</span>{% endif %}
   </div>
   {% endif %}
-  <div class="content">
-    <div class="title">{{ title }}</div>
-    <div class="bubble">{{ text }}</div>
-  </div>
-  <div class="ponte-bottom">
-    {% if ponte_image %}
-    <img class="ponte-img" src="{{ ponte_image }}" alt="ポンテ">
+  <div class="body-area">
+    {% if is_point %}
+    <div class="topic-strip">
+      {% if og_image %}<img class="topic-thumb" src="{{ og_image }}" alt="記事画像">{% endif %}
+      <div class="topic-text">
+        <div class="topic-kicker">{% if source_label %}{{ source_label }}{% else %}TOPIC{% endif %}</div>
+        <div class="topic-title">{{ title | replace("のポイント", "") }}</div>
+      </div>
+    </div>
+    <div class="point-badge">💡 ここがポイント</div>
     {% else %}
-    <div class="ponte-placeholder" style="width:120px;height:120px;font-size:60px;">🤖</div>
+    <div><span class="headline">{{ title }}</span></div>
     {% endif %}
+    <div class="dialog">
+      {% if ponte_image %}<img class="ponte-img" src="{{ ponte_image }}" alt="ポンテ">{% else %}<div class="ponte-placeholder" style="width:120px;height:120px;font-size:60px;">🤖</div>{% endif %}
+      <div class="serif-card{% if text_len > 235 %} serif-xxlong{% elif text_len > 185 %} serif-xlong{% elif text_len > 140 %} serif-long{% endif %}">{{ text }}</div>
+    </div>
   </div>
-  <div class="footer">
-    <span>{{ channel_name }}</span>
-    <span>{{ date }}</span>
-  </div>
+  <div class="brandline">{{ channel_name }}</div>
 </div>
 {% endif %}
 

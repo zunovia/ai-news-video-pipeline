@@ -10,13 +10,22 @@ import argparse
 import json
 import logging
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 PHASES = ["collect", "script", "slides", "video", "upload"]
 SHORTS_PHASES = ["slides_shorts", "video_shorts", "upload_shorts"]
+
+# 日付の既定値は日本時間（JST）基準。UTC基準だと日本の深夜〜朝9時の実行で
+# 前日の日付になってしまう（このパイプラインは深夜0時台に実行されることが多い）
+_JST = timezone(timedelta(hours=9))
+
+
+def today_jst() -> str:
+    """日本時間での今日の日付（YYYYMMDD）を返す."""
+    return datetime.now(_JST).strftime("%Y%m%d")
 
 
 def load_config(config_path: Path = Path("config.json")) -> dict:
@@ -58,6 +67,17 @@ def run_script(date_str: str, config_path: Path, state: dict, script_type: str, 
     news_path = Path(state.get("news_path", f"state/news_{date_str}.json"))
     script_path = generate_script(news_path, config_path, script_type, topic=topic)
     state["script_path"] = str(script_path)
+
+    # 台本の生成元（llm / fallback）をパイプライン状態に記録して一目で分かるようにする
+    config = load_config(config_path)
+    meta_path = Path(config["paths"]["state_dir"]) / f"script_meta_{date_str}.json"
+    if meta_path.exists():
+        try:
+            with open(meta_path, encoding="utf-8") as f:
+                state["script_source"] = json.load(f).get("source", "unknown")
+        except Exception:
+            state["script_source"] = "unknown"
+
     state["phases"]["script"] = "done"
     return state
 
@@ -67,6 +87,16 @@ def run_slides(date_str: str, config_path: Path, state: dict) -> dict:
     script_path = Path(state.get("script_path", f"state/script_{date_str}.md"))
     images_dir = generate_slides(script_path, config_path, date_str)
     state["images_dir"] = str(images_dir)
+
+    # カスタムサムネイル生成（config.youtube.custom_thumbnail で制御。失敗しても続行）
+    try:
+        from slide_generator import generate_thumbnail
+        thumb_path = generate_thumbnail(date_str, config_path)
+        if thumb_path:
+            state["thumbnail_path"] = str(thumb_path)
+    except Exception as e:
+        logger.warning("Thumbnail generation failed (continuing): %s", e)
+
     state["phases"]["slides"] = "done"
     return state
 
@@ -98,18 +128,33 @@ def run_slides_shorts(date_str: str, config_path: Path, state: dict) -> dict:
     return state
 
 
+def _per_topic_enabled(config_path: Path) -> bool:
+    return load_config(config_path).get("shorts", {}).get("per_topic", False)
+
+
 def run_video_shorts(date_str: str, config_path: Path, state: dict) -> dict:
-    from video_builder import build_video
-    video_path = build_video(date_str, config_path, shorts=True)
-    state["video_shorts_path"] = str(video_path)
+    if _per_topic_enabled(config_path):
+        # 「1ニュース=1本」モード: トップN記事それぞれを独立したShortsに
+        from video_builder import build_topic_shorts
+        video_paths = build_topic_shorts(date_str, config_path)
+        state["video_shorts_paths"] = [str(p) for p in video_paths]
+    else:
+        from video_builder import build_video
+        video_path = build_video(date_str, config_path, shorts=True)
+        state["video_shorts_path"] = str(video_path)
     state["phases"]["video_shorts"] = "done"
     return state
 
 
 def run_upload_shorts(date_str: str, config_path: Path, state: dict, script_type: str, topic: str = "") -> dict:
-    from youtube_uploader import upload
-    video_url = upload(date_str, config_path, script_type, shorts=True, topic=topic)
-    state["video_shorts_url"] = video_url
+    if _per_topic_enabled(config_path):
+        from youtube_uploader import upload_topic_shorts
+        video_urls = upload_topic_shorts(date_str, config_path, topic=topic)
+        state["video_shorts_urls"] = video_urls
+    else:
+        from youtube_uploader import upload
+        video_url = upload(date_str, config_path, script_type, shorts=True, topic=topic)
+        state["video_shorts_url"] = video_url
     state["phases"]["upload_shorts"] = "done"
     return state
 
@@ -166,7 +211,7 @@ def run_pipeline(
     state_dir = Path(config["paths"]["state_dir"])
 
     if date_str is None:
-        date_str = datetime.now(timezone.utc).strftime("%Y%m%d")
+        date_str = today_jst()
 
     state_path = state_dir / f"pipeline_{date_str}.json"
     state = load_state(state_path)
@@ -198,12 +243,21 @@ def run_pipeline(
     state["last_run"] = datetime.now(timezone.utc).isoformat()
 
     # Determine which phases to run
-    all_phases = list(PHASES)
-    if shorts:
+    # 16:9まとめ動画は config.pipeline.daily_video_enabled で無効化できる
+    # （2026-07刷新: 長尺デイリーは廃止し「1ニュース=1本」Shortsのみ運用。
+    #   --step で個別フェーズを指定した場合はこの制御を通らず手動実行できる）
+    daily_enabled = config.get("pipeline", {}).get("daily_video_enabled", True)
+    if not daily_enabled:
+        all_phases = ["collect", "script", "slides_shorts", "video_shorts", "upload_shorts"]
+        logger.info("16:9 daily video is disabled (pipeline.daily_video_enabled=false) "
+                    "— running Shorts-only pipeline")
+    elif shorts:
         # Insert Shorts phases after their corresponding regular phases
         # slides → slides_shorts → video → video_shorts → upload → upload_shorts
         all_phases = ["collect", "script", "slides", "slides_shorts",
                       "video", "video_shorts", "upload", "upload_shorts"]
+    else:
+        all_phases = list(PHASES)
 
     if step:
         phases_to_run = [step]
@@ -304,7 +358,8 @@ def main() -> None:
         "--from",
         dest="from_phase",
         default="",
-        choices=["", "collect", "script", "slides", "video", "upload"],
+        choices=["", "collect", "script", "slides", "slides_shorts",
+                 "video", "video_shorts", "upload", "upload_shorts"],
         help="Re-run from this phase onward (resets this and all subsequent phases)",
     )
     args = parser.parse_args()

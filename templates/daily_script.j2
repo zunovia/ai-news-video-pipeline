@@ -4,14 +4,14 @@
 **セリフ**: 「みんなー！ポンテだよ！今日の{{ topic | default("AI") }}ニュース、いってみよう！」
 
 ### スライド2：今日のニュース一覧
-**セリフ**: 「今日の{{ topic | default("AI") }}ニュースはこちら！{% for news in articles %}{{ loop.index }}つ目は{{ news.title_ja }}。{% endfor %}さっそく見ていこう！」
+**セリフ**: 「今日の{{ topic | default("AI") }}ニュースはこちら！{% for news in articles %}{{ loop.index }}つ目、{{ news.label | default(news.title_ja) }}。{% endfor %}どれも気になるよね！さっそく見ていこう！」
 
 {% for news in articles %}
 ### スライド{{ loop.index * 2 + 1 }}：{{ news.title_ja }}
 **セリフ**: 「{{ news.intro }}」
 
 ### スライド{{ loop.index * 2 + 2 }}：{{ news.title_ja }}のポイント
-**セリフ**: 「{{ news.explanation }}」
+**セリフ**: 「{{ news.explanation }}{{ news.insight | default("") }}」
 
 {% endfor %}
 ### スライド{{ articles|length * 2 + 3 }}：今日のキーワード

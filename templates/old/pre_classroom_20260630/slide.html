@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1920, height=1080">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  width: 1920px;
+  height: 1080px;
+  font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif;
+  overflow: hidden;
+}
+
+.slide {
+  width: 1920px;
+  height: 1080px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- Day-of-week theme colors --- */
+.day-mon { --day-grad-start: #1565c0; --day-grad-end: #42a5f5; --day-accent: #1976d2; }
+.day-tue { --day-grad-start: #2e7d32; --day-grad-end: #66bb6a; --day-accent: #388e3c; }
+.day-wed { --day-grad-start: #00695c; --day-grad-end: #4db6ac; --day-accent: #00796b; }
+.day-thu { --day-grad-start: #e65100; --day-grad-end: #ffa726; --day-accent: #ef6c00; }
+.day-fri { --day-grad-start: #c2185b; --day-grad-end: #f06292; --day-accent: #d81b60; }
+.day-sat { --day-grad-start: #6a1b9a; --day-grad-end: #ab47bc; --day-accent: #7b1fa2; }
+.day-sun { --day-grad-start: #c62828; --day-grad-end: #ef5350; --day-accent: #d32f2f; }
+
+/* --- Opening / Ending --- */
+.slide--opening, .slide--ending {
+  background: linear-gradient(135deg, var(--day-grad-start, #667eea) 0%, var(--day-grad-end, #764ba2) 100%);
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  color: white;
+}
+.slide--opening .opening-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  max-height: 100%;
+}
+.slide--opening .opening-ponte {
+  width: 280px;
+  height: auto;
+  margin-bottom: 24px;
+  object-fit: contain;
+}
+.slide--opening .logo { font-size: 80px; margin-bottom: 20px; }
+.slide--opening .channel-name { font-size: 64px; font-weight: 900; margin-bottom: 16px; }
+.slide--opening .tagline { font-size: 36px; opacity: 0.9; }
+.slide--opening .date { font-size: 48px; font-weight: 700; opacity: 1.0; margin-top: 32px; }
+.slide--ending .message { font-size: 48px; font-weight: 700; }
+.slide--ending .sub { font-size: 32px; opacity: 0.8; margin-top: 16px; }
+
+/* --- Index slide --- */
+.slide--index {
+  background: linear-gradient(135deg, var(--day-grad-start, #667eea) 0%, var(--day-grad-end, #764ba2) 100%);
+  color: white;
+}
+.slide--index .index-header {
+  text-align: center;
+  padding: 48px 60px 24px;
+  font-size: 48px;
+  font-weight: 900;
+}
+.slide--index .index-body {
+  flex: 1;
+  display: flex;
+  padding: 0 80px 48px;
+  gap: 48px;
+}
+.slide--index .index-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 20px;
+}
+.slide--index .index-item {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  background: rgba(255,255,255,0.15);
+  border-radius: 16px;
+  padding: 20px 32px;
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.slide--index .index-item .item-number {
+  background: rgba(255,255,255,0.3);
+  border-radius: 50%;
+  min-width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  font-weight: 900;
+}
+.slide--index .ponte-area {
+  width: 320px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.slide--index .ponte-img {
+  max-width: 280px;
+  max-height: 360px;
+}
+
+/* --- News slide --- */
+.slide--news {
+  background: linear-gradient(180deg, #f0f4ff 0%, #ffffff 100%);
+}
+/* Light tinted backgrounds per article - using day theme's accent color */
+.slide--news.bg-1 { background: linear-gradient(180deg, color-mix(in srgb, var(--day-grad-end, #667eea) 12%, white) 0%, #ffffff 100%); }
+.slide--news.bg-2 { background: linear-gradient(180deg, color-mix(in srgb, var(--day-grad-end, #667eea) 18%, white) 0%, #ffffff 100%); }
+.slide--news.bg-3 { background: linear-gradient(180deg, color-mix(in srgb, var(--day-grad-end, #667eea) 12%, white) 0%, #ffffff 100%); }
+.slide--news.bg-4 { background: linear-gradient(180deg, color-mix(in srgb, var(--day-grad-end, #667eea) 18%, white) 0%, #ffffff 100%); }
+.slide--news.bg-5 { background: linear-gradient(180deg, color-mix(in srgb, var(--day-grad-end, #667eea) 12%, white) 0%, #ffffff 100%); }
+
+.slide--news .header {
+  background: linear-gradient(90deg, var(--day-grad-start, #667eea), var(--day-grad-end, #764ba2));
+  color: white;
+  padding: 32px 60px;
+  font-size: 28px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.slide--news .header .news-number {
+  background: rgba(255,255,255,0.3);
+  border-radius: 50%;
+  width: 56px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  font-weight: 900;
+}
+.slide--news .header .header-right {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+.slide--news .header .news-progress {
+  background: rgba(255,255,255,0.25);
+  border-radius: 999px;
+  padding: 8px 24px;
+  font-size: 26px;
+  font-weight: 800;
+}
+.slide--news .header .source-badge {
+  background: rgba(0,0,0,0.25);
+  border-radius: 999px;
+  padding: 8px 24px;
+  font-size: 24px;
+  font-weight: 700;
+  opacity: 0.95;
+}
+.slide--news .body {
+  flex: 1;
+  display: flex;
+  padding: 32px 60px;
+  gap: 36px;
+}
+.slide--news .content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.slide--news .title {
+  font-size: 46px;
+  font-weight: 900;
+  color: #1a1a2e;
+  line-height: 1.4;
+  margin-bottom: 20px;
+}
+/* Speech bubble style for text */
+.slide--news .bubble {
+  background: #fff;
+  border-radius: 24px;
+  padding: 24px 32px;
+  position: relative;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+  font-size: 30px;
+  color: #333;
+  line-height: 1.7;
+}
+.slide--news .bubble::after {
+  content: "";
+  position: absolute;
+  right: -20px;
+  bottom: 40px;
+  border: 16px solid transparent;
+  border-left-color: #fff;
+}
+.slide--news .text {
+  font-size: 30px;
+  color: #333;
+  line-height: 1.7;
+}
+/* OG image on the right half */
+.slide--news .og-image-area {
+  width: 50%;
+  flex-shrink: 0;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+  display: flex;
+  align-items: center;
+  background: #f5f5f5;
+  position: relative;
+}
+/* contain の余白を同一画像のブラーで埋める（額縁効果） */
+.slide--news .og-img-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(24px);
+  transform: scale(1.15);
+  opacity: 0.55;
+}
+.slide--news .og-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  position: relative;
+  z-index: 1;
+}
+/* Ponte: small overlay at bottom-left of content when OG image is present */
+.slide--news .ponte-area {
+  width: 300px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.slide--news .ponte-img {
+  max-width: 280px;
+  max-height: 350px;
+}
+/* When OG image is shown, shrink ponte into a small overlay */
+.slide--news .ponte-area--small {
+  position: absolute;
+  bottom: 70px;
+  left: 60px;
+  width: auto;
+}
+.slide--news .ponte-area--small .ponte-img {
+  max-width: 160px;
+  max-height: 200px;
+}
+
+/* --- Footer --- */
+.footer {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 60px;
+  background: color-mix(in srgb, var(--day-accent, #667eea) 10%, white);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 60px;
+  font-size: 22px;
+  color: var(--day-accent, #667eea);
+}
+
+/* --- Ruby --- */
+ruby { ruby-position: over; }
+rt { font-size: 0.45em; font-weight: 400; color: inherit; }
+
+/* --- Keyword slide --- */
+.slide--keyword {
+  background: linear-gradient(135deg, #fff3cd 0%, #ffe0b2 100%);
+}
+.slide--keyword .keyword-header {
+  text-align: center;
+  padding: 48px 60px 24px;
+  font-size: 52px;
+  font-weight: 900;
+  color: #c62828;
+}
+.slide--keyword .keyword-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 80px 48px;
+  gap: 24px;
+}
+.slide--keyword .keyword-card {
+  background: rgba(255,255,255,0.85);
+  border-radius: 20px;
+  padding: 24px 36px;
+  display: flex;
+  align-items: baseline;
+  gap: 20px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+.slide--keyword .keyword-term {
+  font-size: 36px;
+  font-weight: 800;
+  color: #c62828;
+  white-space: nowrap;
+}
+.slide--keyword .keyword-desc {
+  font-size: 30px;
+  color: #333;
+  line-height: 1.6;
+}
+
+/* Ponte placeholder when no image */
+.ponte-placeholder {
+  width: 200px;
+  height: 200px;
+  background: linear-gradient(135deg, #a8edea, #fed6e3);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 80px;
+}
+</style>
+</head>
+<body>
+
+{% if slide_type == "opening" %}
+<div class="slide slide--opening {{ day_class }}">
+  <div class="opening-content">
+    {% if ponte_image %}
+    <img src="{{ ponte_image }}" alt="ポンテ" class="opening-ponte">
+    {% else %}
+    <div class="logo">🤖</div>
+    {% endif %}
+    <div class="channel-name">{{ channel_name }}</div>
+    <div class="tagline">{{ tagline }}</div>
+    <div class="date">{{ date }}</div>
+  </div>
+</div>
+
+{% elif slide_type == "index" %}
+<div class="slide slide--index {{ day_class }}">
+  <div class="index-header">{{ index_heading | default("TODAY'S AI NEWS") }}</div>
+  <div class="index-body">
+    <div class="index-list">
+      {% for item in index_items %}
+      <div class="index-item">
+        <div class="item-number">{{ loop.index }}</div>
+        <span>{{ item }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="ponte-area">
+      {% if ponte_image %}
+      <img class="ponte-img" src="{{ ponte_image }}" alt="ポンテ">
+      {% else %}
+      <div class="ponte-placeholder" style="width:160px;height:160px;font-size:60px;">🤖</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% elif slide_type == "keyword" %}
+<div class="slide slide--keyword {{ day_class }}">
+  <div class="keyword-header">📖 今日のキーワード</div>
+  <div class="keyword-body">
+    {% for kw in keyword_items %}
+    <div class="keyword-card">
+      <div class="keyword-term">{{ kw.term }}</div>
+      <div class="keyword-desc">{{ kw.desc }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="footer" style="background: rgba(198, 40, 40, 0.1); color: #c62828;">
+    <span>{{ channel_name }}</span>
+    <span>{{ date }}</span>
+  </div>
+</div>
+
+{% elif slide_type == "ending" %}
+<div class="slide slide--ending {{ day_class }}">
+  {% if ponte_image %}
+  <img src="{{ ponte_image }}" alt="ポンテ" style="width: 240px; height: auto; margin-bottom: 24px;">
+  {% else %}
+  <div class="logo" style="font-size:80px; margin-bottom:24px;">🤖</div>
+  {% endif %}
+  <div class="message">{{ ending_message | default("また明日ね！") }}</div>
+  <div class="sub">チャンネル登録・いいね、よろしくね！</div>
+</div>
+
+{% else %}
+<div class="slide slide--news {{ bg_variant }} {{ day_class }}">
+  <div class="header">
+    <div class="news-number">{{ news_number }}</div>
+    <span>{{ header_label | default("TODAY'S AI NEWS") }}</span>
+    <div class="header-right">
+      {% if news_total %}<span class="news-progress">ニュース {{ news_number }}/{{ news_total }}</span>{% endif %}
+      {% if source_label %}<span class="source-badge">{{ source_label }} より</span>{% endif %}
+    </div>
+  </div>
+  <div class="body">
+    <div class="content">
+      <div class="title">{{ title }}</div>
+      <div class="bubble">{{ text }}</div>
+    </div>
+    {% if og_image %}
+    <div class="og-image-area">
+      <img class="og-img-bg" src="{{ og_image }}" alt="">
+      <img class="og-img" src="{{ og_image }}" alt="記事画像">
+    </div>
+    <div class="ponte-area--small">
+      {% if ponte_image %}
+      <img class="ponte-img" src="{{ ponte_image }}" alt="ポンテ">
+      {% endif %}
+    </div>
+    {% else %}
+    <div class="ponte-area">
+      {% if ponte_image %}
+      <img class="ponte-img" src="{{ ponte_image }}" alt="ポンテ">
+      {% else %}
+      <div class="ponte-placeholder">🤖</div>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+  <div class="footer">
+    <span>{{ channel_name }}</span>
+    <span>{{ date }}</span>
+  </div>
+</div>
+{% endif %}
+
+</body>
+</html>

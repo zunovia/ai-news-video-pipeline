@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280, height=720">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  width: 1280px;
+  height: 720px;
+  font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif;
+  overflow: hidden;
+}
+
+/* --- Day-of-week theme colors --- */
+.day-mon { --day-grad-start: #1565c0; --day-grad-end: #42a5f5; --day-accent: #1976d2; }
+.day-tue { --day-grad-start: #2e7d32; --day-grad-end: #66bb6a; --day-accent: #388e3c; }
+.day-wed { --day-grad-start: #00695c; --day-grad-end: #4db6ac; --day-accent: #00796b; }
+.day-thu { --day-grad-start: #e65100; --day-grad-end: #ffa726; --day-accent: #ef6c00; }
+.day-fri { --day-grad-start: #c2185b; --day-grad-end: #f06292; --day-accent: #d81b60; }
+.day-sat { --day-grad-start: #6a1b9a; --day-grad-end: #ab47bc; --day-accent: #7b1fa2; }
+.day-sun { --day-grad-start: #c62828; --day-grad-end: #ef5350; --day-accent: #d32f2f; }
+
+.thumb {
+  width: 1280px;
+  height: 720px;
+  position: relative;
+  background: linear-gradient(135deg, var(--day-grad-start, #667eea) 0%, var(--day-grad-end, #764ba2) 100%);
+  overflow: hidden;
+}
+
+/* OG画像をブラー背景として全面に敷く */
+.bg-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(8px) brightness(0.55);
+  transform: scale(1.08);
+}
+
+/* 暗めのグラデーションを重ねて文字を読みやすく */
+.overlay {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(105deg,
+    color-mix(in srgb, var(--day-grad-start, #667eea) 88%, black) 0%,
+    color-mix(in srgb, var(--day-grad-start, #667eea) 60%, transparent) 55%,
+    transparent 100%);
+}
+
+.content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: stretch;
+  padding: 48px 56px;
+  color: white;
+}
+
+.left {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 28px;
+  z-index: 2;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+  align-self: flex-start;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--day-accent, #667eea);
+  font-size: 34px;
+  font-weight: 900;
+  padding: 10px 28px;
+  border-radius: 999px;
+}
+
+.title {
+  font-size: 72px;
+  font-weight: 900;
+  line-height: 1.3;
+  text-shadow: 0 4px 16px rgba(0,0,0,0.45);
+  word-break: break-word;
+}
+
+.sub {
+  font-size: 34px;
+  font-weight: 700;
+  opacity: 0.95;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+.sub .count {
+  background: #ffd54f;
+  color: #4e342e;
+  border-radius: 12px;
+  padding: 4px 18px;
+  font-weight: 900;
+}
+
+.ponte-area {
+  width: 360px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  z-index: 2;
+}
+.ponte-img {
+  max-width: 340px;
+  max-height: 480px;
+  filter: drop-shadow(0 8px 24px rgba(0,0,0,0.35));
+}
+
+.channel-strip {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  background: rgba(0,0,0,0.45);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 56px;
+  font-size: 28px;
+  font-weight: 700;
+  color: white;
+  z-index: 3;
+}
+
+ruby { ruby-position: over; }
+rt { font-size: 0.42em; font-weight: 400; color: inherit; }
+</style>
+</head>
+<body>
+<div class="thumb {{ day_class }}">
+  {% if og_image %}
+  <img class="bg-image" src="{{ og_image }}" alt="">
+  {% endif %}
+  <div class="overlay"></div>
+  <div class="content">
+    <div class="left">
+      <div class="badge">🤖 今日の{{ topic | default("AI") }}ニュース</div>
+      <div class="title">{{ title }}</div>
+      <div class="sub"><span class="count">{{ news_count }}本</span><span>{{ date }}</span></div>
+    </div>
+    <div class="ponte-area">
+      {% if ponte_image %}
+      <img class="ponte-img" src="{{ ponte_image }}" alt="ポンテ">
+      {% endif %}
+    </div>
+  </div>
+  <div class="channel-strip">
+    <span>{{ channel_name }}</span>
+    <span>{{ tagline }}</span>
+  </div>
+</div>
+</body>
+</html>

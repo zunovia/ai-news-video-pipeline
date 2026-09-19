@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1080, height=1920">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  width: 1080px;
+  height: 1920px;
+  font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif;
+  overflow: hidden;
+}
+
+.slide {
+  width: 1080px;
+  height: 1920px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- Day-of-week theme colors --- */
+.day-mon { --day-grad-start: #1565c0; --day-grad-end: #42a5f5; --day-accent: #1976d2; }
+.day-tue { --day-grad-start: #2e7d32; --day-grad-end: #66bb6a; --day-accent: #388e3c; }
+.day-wed { --day-grad-start: #00695c; --day-grad-end: #4db6ac; --day-accent: #00796b; }
+.day-thu { --day-grad-start: #e65100; --day-grad-end: #ffa726; --day-accent: #ef6c00; }
+.day-fri { --day-grad-start: #c2185b; --day-grad-end: #f06292; --day-accent: #d81b60; }
+.day-sat { --day-grad-start: #6a1b9a; --day-grad-end: #ab47bc; --day-accent: #7b1fa2; }
+.day-sun { --day-grad-start: #c62828; --day-grad-end: #ef5350; --day-accent: #d32f2f; }
+
+/* --- Opening --- */
+.slide--opening {
+  background: linear-gradient(135deg, var(--day-grad-start, #667eea) 0%, var(--day-grad-end, #764ba2) 100%);
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  color: white;
+  padding: 60px 0;
+}
+.slide--opening .ponte-img-large {
+  width: 360px;
+  height: auto;
+  margin-bottom: 40px;
+}
+.slide--opening .logo { font-size: 120px; margin-bottom: 40px; }
+.slide--opening .channel-name { font-size: 80px; font-weight: 900; margin-bottom: 24px; }
+.slide--opening .tagline { font-size: 44px; opacity: 0.9; }
+.slide--opening .date { font-size: 56px; font-weight: 700; opacity: 1.0; margin-top: 48px; }
+
+/* --- Ending --- */
+.slide--ending {
+  background: linear-gradient(135deg, var(--day-grad-start, #667eea) 0%, var(--day-grad-end, #764ba2) 100%);
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  color: white;
+}
+.slide--ending .ponte-img-large {
+  width: 320px;
+  height: auto;
+  margin-bottom: 40px;
+}
+.slide--ending .logo { font-size: 120px; margin-bottom: 40px; }
+.slide--ending .message { font-size: 64px; font-weight: 700; }
+.slide--ending .sub { font-size: 40px; opacity: 0.8; margin-top: 24px; }
+
+/* --- News slide --- */
+.slide--news {
+  background: linear-gradient(180deg, #f0f4ff 0%, #ffffff 100%);
+}
+/* Light tinted backgrounds per article */
+.slide--news.bg-1 { background: linear-gradient(180deg, color-mix(in srgb, var(--day-grad-end, #667eea) 12%, white) 0%, #ffffff 100%); }
+.slide--news.bg-2 { background: linear-gradient(180deg, color-mix(in srgb, var(--day-grad-end, #667eea) 18%, white) 0%, #ffffff 100%); }
+.slide--news.bg-3 { background: linear-gradient(180deg, color-mix(in srgb, var(--day-grad-end, #667eea) 12%, white) 0%, #ffffff 100%); }
+.slide--news.bg-4 { background: linear-gradient(180deg, color-mix(in srgb, var(--day-grad-end, #667eea) 18%, white) 0%, #ffffff 100%); }
+.slide--news.bg-5 { background: linear-gradient(180deg, color-mix(in srgb, var(--day-grad-end, #667eea) 12%, white) 0%, #ffffff 100%); }
+
+.slide--news .header {
+  background: linear-gradient(90deg, var(--day-grad-start, #667eea), var(--day-grad-end, #764ba2));
+  color: white;
+  padding: 36px 48px;
+  font-size: 32px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.slide--news .header .news-number {
+  background: rgba(255,255,255,0.3);
+  border-radius: 50%;
+  width: 60px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 36px;
+  font-weight: 900;
+  flex-shrink: 0;
+}
+.slide--news .header .header-right {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+.slide--news .header .news-progress {
+  background: rgba(255,255,255,0.25);
+  border-radius: 999px;
+  padding: 4px 18px;
+  font-size: 24px;
+  font-weight: 800;
+}
+.slide--news .header .source-badge {
+  background: rgba(0,0,0,0.25);
+  border-radius: 999px;
+  padding: 4px 18px;
+  font-size: 20px;
+  font-weight: 700;
+  opacity: 0.95;
+}
+
+/* OG image area - top section */
+.slide--news .og-image-area {
+  width: 100%;
+  height: 680px;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: #f5f5f5;
+}
+.slide--news .og-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Content area */
+.slide--news .content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 36px 48px;
+  gap: 24px;
+  min-height: 0;
+}
+.slide--news .title {
+  font-size: 52px;
+  font-weight: 900;
+  color: #1a1a2e;
+  line-height: 1.4;
+}
+.slide--news .bubble {
+  background: #fff;
+  border-radius: 24px;
+  padding: 28px 36px;
+  position: relative;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+  font-size: 34px;
+  color: #333;
+  line-height: 1.7;
+}
+.slide--news .bubble::after {
+  content: "";
+  position: absolute;
+  bottom: -16px;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 12px solid transparent;
+  border-top-color: #fff;
+}
+
+/* Ponte at bottom */
+.slide--news .ponte-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px 0 24px;
+  flex-shrink: 0;
+}
+.slide--news .ponte-bottom .ponte-img {
+  max-width: 160px;
+  max-height: 180px;
+}
+
+/* Footer */
+.footer {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  background: color-mix(in srgb, var(--day-accent, #667eea) 10%, white);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 48px;
+  font-size: 26px;
+  color: var(--day-accent, #667eea);
+}
+
+/* Ruby */
+ruby { ruby-position: over; }
+rt { font-size: 0.45em; font-weight: 400; color: inherit; }
+
+/* --- Keyword slide --- */
+.slide--keyword {
+  background: linear-gradient(135deg, #fff3cd 0%, #ffe0b2 100%);
+}
+.slide--keyword .keyword-header {
+  text-align: center;
+  padding: 56px 48px 32px;
+  font-size: 60px;
+  font-weight: 900;
+  color: #c62828;
+}
+.slide--keyword .keyword-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0 48px 48px;
+  gap: 28px;
+}
+.slide--keyword .keyword-card {
+  background: rgba(255,255,255,0.85);
+  border-radius: 20px;
+  padding: 28px 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+.slide--keyword .keyword-term {
+  font-size: 42px;
+  font-weight: 800;
+  color: #c62828;
+}
+.slide--keyword .keyword-desc {
+  font-size: 34px;
+  color: #333;
+  line-height: 1.6;
+}
+
+/* Ponte placeholder */
+.ponte-placeholder {
+  width: 160px;
+  height: 160px;
+  background: linear-gradient(135deg, #a8edea, #fed6e3);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 80px;
+}
+</style>
+</head>
+<body>
+
+{% if slide_type == "opening" %}
+<div class="slide slide--opening {{ day_class }}">
+  {% if ponte_image %}
+  <img class="ponte-img-large" src="{{ ponte_image }}" alt="ポンテ">
+  {% else %}
+  <div class="logo">🤖</div>
+  {% endif %}
+  <div class="channel-name">{{ channel_name }}</div>
+  <div class="tagline">{{ tagline }}</div>
+  <div class="date">{{ date }}</div>
+</div>
+
+{% elif slide_type == "keyword" %}
+<div class="slide slide--keyword {{ day_class }}">
+  <div class="keyword-header">📖 今日のキーワード</div>
+  <div class="keyword-body">
+    {% for kw in keyword_items %}
+    <div class="keyword-card">
+      <div class="keyword-term">{{ kw.term }}</div>
+      <div class="keyword-desc">{{ kw.desc }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="footer" style="background: rgba(198, 40, 40, 0.1); color: #c62828;">
+    <span>{{ channel_name }}</span>
+    <span>{{ date }}</span>
+  </div>
+</div>
+
+{% elif slide_type == "ending" %}
+<div class="slide slide--ending {{ day_class }}">
+  {% if ponte_image %}
+  <img class="ponte-img-large" src="{{ ponte_image }}" alt="ポンテ">
+  {% else %}
+  <div class="logo">🤖</div>
+  {% endif %}
+  <div class="message">{{ ending_message | default("また明日ね！") }}</div>
+  <div class="sub">チャンネル登録・いいね、よろしくね！</div>
+</div>
+
+{% else %}
+<div class="slide slide--news {{ bg_variant }} {{ day_class }}">
+  <div class="header">
+    <div class="news-number">{{ news_number }}</div>
+    <span>{{ header_label | default("TODAY'S AI NEWS") }}</span>
+    <div class="header-right">
+      {% if news_total %}<span class="news-progress">{{ news_number }}/{{ news_total }}</span>{% endif %}
+      {% if source_label %}<span class="source-badge">{{ source_label }}</span>{% endif %}
+    </div>
+  </div>
+  {% if og_image %}
+  <div class="og-image-area">
+    <img class="og-img" src="{{ og_image }}" alt="記事画像">
+  </div>
+  {% endif %}
+  <div class="content">
+    <div class="title">{{ title }}</div>
+    <div class="bubble">{{ text }}</div>
+  </div>
+  <div class="ponte-bottom">
+    {% if ponte_image %}
+    <img class="ponte-img" src="{{ ponte_image }}" alt="ポンテ">
+    {% else %}
+    <div class="ponte-placeholder" style="width:120px;height:120px;font-size:60px;">🤖</div>
+    {% endif %}
+  </div>
+  <div class="footer">
+    <span>{{ channel_name }}</span>
+    <span>{{ date }}</span>
+  </div>
+</div>
+{% endif %}
+
+</body>
+</html>

@@ -17,18 +17,8 @@ logger = logging.getLogger(__name__)
 # API Key resolution
 # ---------------------------------------------------------------------------
 
-def resolve_anthropic_api_key(env_var: str = "ANTHROPIC_API_KEY") -> str:
-    """Resolve Anthropic API key from multiple sources."""
-    key = os.environ.get(env_var, "")
-    if key:
-        return key
-
-    for candidate in [Path(".api_key"), Path(__file__).parent / ".api_key"]:
-        if candidate.exists():
-            key = candidate.read_text(encoding="utf-8").strip()
-            if key:
-                return key
-
+def _resolve_oauth_token() -> str:
+    """Return the Claude Code subscription access token, or raise if not logged in."""
     cred_path = Path.home() / ".claude" / ".credentials.json"
     if cred_path.exists():
         try:
@@ -38,8 +28,53 @@ def resolve_anthropic_api_key(env_var: str = "ANTHROPIC_API_KEY") -> str:
                 return token
         except (json.JSONDecodeError, KeyError):
             pass
+    raise RuntimeError(
+        "Claude subscription token not found. Log in with `claude /login` "
+        "(this project is configured for subscription-only auth, no billed API)."
+    )
 
-    raise RuntimeError("Anthropic API key not found.")
+
+def resolve_anthropic_auth(
+    env_var: str = "ANTHROPIC_API_KEY",
+    subscription_only: bool = False,
+) -> tuple[str, str]:
+    """Resolve Anthropic credentials.
+
+    Returns a ``(mode, token)`` tuple where ``mode`` is either:
+      - ``"api_key"``: a normal Anthropic API key (billed pay-per-use).
+      - ``"oauth"``: a Claude Code subscription access token (``sk-ant-oat...``),
+        which must be sent as a Bearer ``auth_token`` together with the OAuth
+        beta header instead of ``x-api-key``.
+
+    When ``subscription_only`` is True, the billed-API-key sources (env var,
+    ``.api_key``) are ignored entirely and only the Claude Code login is used —
+    guaranteeing no pay-per-use charges.
+
+    Otherwise priority is: env var / ``.api_key`` file > Claude Code login.
+    """
+    if subscription_only:
+        return ("oauth", _resolve_oauth_token())
+
+    key = os.environ.get(env_var, "")
+    if key:
+        return ("api_key", key)
+
+    for candidate in [Path(".api_key"), Path(__file__).parent / ".api_key"]:
+        if candidate.exists():
+            key = candidate.read_text(encoding="utf-8").strip()
+            if key:
+                return ("api_key", key)
+
+    return ("oauth", _resolve_oauth_token())
+
+
+def resolve_anthropic_api_key(env_var: str = "ANTHROPIC_API_KEY") -> str:
+    """Backward-compatible helper returning just the token."""
+    return resolve_anthropic_auth(env_var)[1]
+
+
+# Beta header required to authenticate with a Claude Code subscription OAuth token.
+_OAUTH_BETA = "oauth-2025-04-20"
 
 
 def resolve_gemini_api_key(config: dict | None = None) -> str:
@@ -134,10 +169,24 @@ class LLMClient:
         import anthropic
 
         claude_cfg = self.config.get("claude", {})
-        api_key = resolve_anthropic_api_key(claude_cfg.get("api_key_env", "ANTHROPIC_API_KEY"))
-        model = claude_cfg.get("model", "claude-sonnet-4-20250514")
+        # "subscription" (default here) forces Claude Code login only — never a billed API key.
+        subscription_only = claude_cfg.get("auth_mode", "subscription") == "subscription"
+        mode, token = resolve_anthropic_auth(
+            claude_cfg.get("api_key_env", "ANTHROPIC_API_KEY"),
+            subscription_only=subscription_only,
+        )
+        model = claude_cfg.get("model", "claude-haiku-4-5")
 
-        client = anthropic.Anthropic(api_key=api_key)
+        # A normal API key uses x-api-key; a Claude Code OAuth token must be sent
+        # as a Bearer auth_token with the OAuth beta header.
+        if mode == "oauth":
+            client = anthropic.Anthropic(
+                auth_token=token,
+                default_headers={"anthropic-beta": _OAUTH_BETA},
+            )
+        else:
+            client = anthropic.Anthropic(api_key=token)
+
         response = client.messages.create(
             model=model,
             max_tokens=max_tokens,

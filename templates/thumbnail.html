@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1280, height=720">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1280px; height: 720px; font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; overflow: hidden; }
+
+.day-mon { --day-grad-start: #1565c0; --day-grad-end: #42a5f5; --day-accent: #1976d2; }
+.day-tue { --day-grad-start: #2e7d32; --day-grad-end: #66bb6a; --day-accent: #388e3c; }
+.day-wed { --day-grad-start: #00695c; --day-grad-end: #4db6ac; --day-accent: #00796b; }
+.day-thu { --day-grad-start: #e65100; --day-grad-end: #ffa726; --day-accent: #ef6c00; }
+.day-fri { --day-grad-start: #c2185b; --day-grad-end: #f06292; --day-accent: #d81b60; }
+.day-sat { --day-grad-start: #6a1b9a; --day-grad-end: #ab47bc; --day-accent: #7b1fa2; }
+.day-sun { --day-grad-start: #c62828; --day-grad-end: #ef5350; --day-accent: #d32f2f; }
+
+.thumb {
+  width: 1280px; height: 720px; position: relative; overflow: hidden;
+  --board: color-mix(in srgb, var(--day-accent, #388e3c) 26%, #142019);
+  --chalk: #f3f5ee; --tape: rgba(255, 233, 150, 0.72);
+  --wood-a: #74471f; --wood-b: #b9854b;
+  background-color: var(--board);
+  background-image:
+    radial-gradient(ellipse at 30% 25%, rgba(255,255,255,.06), transparent 50%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  border: 18px solid;
+  border-image: linear-gradient(135deg, var(--wood-b) 0%, var(--wood-a) 45%, #5e3917 55%, var(--wood-b) 100%) 1;
+  box-shadow: inset 0 0 0 3px rgba(0,0,0,.3), inset 0 0 70px rgba(0,0,0,.5);
+}
+
+/* taped article photo, upper-right */
+.photo {
+  position: absolute; top: 30px; right: 96px; width: 430px;
+  background: #fff; padding: 12px 12px 34px; border-radius: 3px;
+  box-shadow: 0 14px 34px rgba(0,0,0,.4); transform: rotate(3deg); z-index: 1;
+}
+.photo .pic { width: 100%; height: 236px; object-fit: cover; display: block; border-radius: 2px; background: #ddd; }
+.photo::after { content: ""; position: absolute; top: -14px; left: 50%; transform: translateX(-50%) rotate(-3deg); width: 160px; height: 36px; background: var(--tape); box-shadow: 0 2px 6px rgba(0,0,0,.2); }
+
+.content { position: absolute; inset: 0; z-index: 2; display: flex; padding: 40px 44px; }
+.left { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 24px; max-width: 640px; margin-top: 40px; }
+
+.badge {
+  align-self: flex-start; display: inline-flex; align-items: center; gap: 12px;
+  background: var(--tape); color: #5b4a1e; font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; font-size: 34px; font-weight: 600;
+  padding: 8px 26px; border-radius: 6px; transform: rotate(-1.5deg); box-shadow: 0 3px 8px rgba(0,0,0,.25);
+}
+
+.title {
+  font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; font-size: 76px; font-weight: 600; line-height: 1.28; color: var(--chalk);
+  text-shadow: 0 2px 0 rgba(0,0,0,.35), 0 0 18px rgba(255,255,255,.12); word-break: break-word;
+}
+.title .em { color: #ffe27a; }
+
+.sub { display: flex; align-items: center; gap: 18px; font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; font-size: 34px; font-weight: 600; color: var(--chalk); }
+.sub .count { display: inline-flex; align-items: center; justify-content: center; min-width: 92px; height: 60px; padding: 0 14px; border: 3px solid var(--chalk); border-radius: 50%/55%; font-size: 36px; }
+
+.ponte-area { position: absolute; right: 26px; bottom: 0; width: 360px; display: flex; align-items: flex-end; justify-content: center; z-index: 3; }
+.ponte-img { max-width: 350px; max-height: 470px; filter: drop-shadow(0 10px 26px rgba(0,0,0,.45)); }
+
+.channel-strip {
+  position: absolute; bottom: 18px; left: 44px; right: 410px; z-index: 4;
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; font-size: 26px; font-weight: 600; color: var(--chalk); opacity: .92;
+  border-top: 2px dotted rgba(243,245,238,.5); padding-top: 10px;
+}
+
+ruby { ruby-position: over; }
+rt { font-size: 0.40em; font-weight: 400; color: inherit; opacity: .9; }
+</style>
+</head>
+<body>
+<div class="thumb {{ day_class }}">
+  {% if og_image %}
+  <div class="photo"><img class="pic" src="{{ og_image }}" alt=""></div>
+  {% endif %}
+  <div class="content">
+    <div class="left">
+      <div class="badge">📖 今日の{{ topic | default("AI") }}ニュース</div>
+      <div class="title">{{ title }}</div>
+      <div class="sub"><span class="count">{{ news_count }}本</span><span>{{ date }}</span></div>
+    </div>
+  </div>
+  <div class="ponte-area">
+    {% if ponte_image %}<img class="ponte-img" src="{{ ponte_image }}" alt="ポンテ">{% endif %}
+  </div>
+  <div class="channel-strip"><span>{{ channel_name }}</span><span>{{ tagline }}</span></div>
+</div>
+</body>
+</html>

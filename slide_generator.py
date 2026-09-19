@@ -26,11 +26,12 @@ _WEEKDAY_CLASSES = ["day-mon", "day-tue", "day-wed", "day-thu", "day-fri", "day-
 
 # ルビ記法:
 #   漢字(ふりがな) → <ruby>漢字<rt>ふりがな</rt></ruby>
-#   English(カタカナ) → <ruby>English<rt>カタカナ</rt></ruby>
+#   漢字+送り仮名(読み) → <ruby>漢字+送り仮名<rt>読み</rt></ruby>
+#   English(カタカナ/ひらがな) → <ruby>English<rt>読み</rt></ruby>
 _RUBY_RE = re.compile(
-    r"([\u4e00-\u9fff\u3400-\u4dbf々]+)\(([ぁ-んァ-ヶー]+)\)"
+    r"([\u4e00-\u9fff\u3400-\u4dbf々]+[ぁ-ん]*)[(\uff08]([ぁ-んァ-ヶー]+)[)\uff09]"
     r"|"
-    r"([A-Za-z0-9][\w\s\-\.]*[A-Za-z0-9]|[A-Za-z0-9])\(([ァ-ヶー]+)\)"
+    r"([A-Za-z0-9][A-Za-z0-9_\s\-\.]*[A-Za-z0-9]|[A-Za-z0-9])[(\uff08]([ぁ-んァ-ヶー]+)[)\uff09]"
 )
 
 # キーワード箇条書き: - **term**: desc
@@ -80,9 +81,9 @@ def apply_ruby(text: str) -> str:
 
 
 _RUBY_EXTRACT_RE = re.compile(
-    r"([\u4e00-\u9fff\u3400-\u4dbf々]+)\(([ぁ-んァ-ヶー]+)\)"
+    r"([\u4e00-\u9fff\u3400-\u4dbf々]+[ぁ-ん]*)[(\uff08]([ぁ-んァ-ヶー]+)[)\uff09]"
     r"|"
-    r"([A-Za-z0-9][\w\s\-\.]*[A-Za-z0-9]|[A-Za-z0-9])\(([ァ-ヶー]+)\)"
+    r"([A-Za-z0-9][A-Za-z0-9_\s\-\.]*[A-Za-z0-9]|[A-Za-z0-9])[(\uff08]([ぁ-んァ-ヶー]+)[)\uff09]"
 )
 
 
@@ -97,12 +98,74 @@ def _extract_ruby_dict(text: str) -> dict[str, str]:
     return ruby_dict
 
 
+_KANJI_ONE_RE = re.compile(r"[一-鿿㐀-䶿々]")
+
+
+def _is_kanji_char(ch: str) -> bool:
+    return bool(ch) and bool(_KANJI_ONE_RE.match(ch))
+
+
+def _is_alnum_ascii(ch: str) -> bool:
+    return bool(ch) and ch.isascii() and ch.isalnum()
+
+
 def _apply_ruby_dict(text: str, ruby_dict: dict[str, str]) -> str:
-    """タイトルテキストにルビ辞書を適用する。長いキーから順に置換."""
+    """セリフ由来のルビ辞書をタイトルへ転写する（手修正ルビの伝播用）.
+
+    語の境界を尊重し、より長い語の「内側」へ部分マッチさせない:
+      - 漢字語は前後が漢字のとき適用しない（＝より大きな熟語の一部）。
+        例: 「能力(のうりょく)」を「診断能力」の中に入れて
+            診断能力(のうりょく) という壊れたルビを作らない（診断の読みが消える）。
+        この場合は転写せず、後段の add_ruby_to_text（形態素解析）に熟語全体を任せる。
+      - 英数語は前後が英数字のとき適用しない（＝より大きな英単語の一部）。
+        例: 「AI(エーアイ)」を「OpenAI」の中に入れて OpenAI(エーアイ) を作らない。
+    既存のルビ注釈と重複する箇所もスキップする。
+    """
     for word in sorted(ruby_dict, key=len, reverse=True):
-        if word in text:
-            text = text.replace(word, f"{word}({ruby_dict[word]})")
+        if not word:
+            continue
+        protected = [(m.start(), m.end()) for m in _RUBY_EXTRACT_RE.finditer(text)]
+        starts_kanji = _is_kanji_char(word[0])
+        ends_kanji = _is_kanji_char(word[-1])
+        starts_alnum = _is_alnum_ascii(word[0])
+        ends_alnum = _is_alnum_ascii(word[-1])
+
+        for m in re.finditer(re.escape(word), text):
+            s, e = m.start(), m.end()
+            # 既存ルビと重複
+            if any(s < pe and e > ps for ps, pe in protected):
+                continue
+            before = text[s - 1] if s > 0 else ""
+            after = text[e] if e < len(text) else ""
+            # より大きな熟語の一部（漢字が隣接）なら適用しない
+            if (starts_kanji and _is_kanji_char(before)) or (ends_kanji and _is_kanji_char(after)):
+                continue
+            # より大きな英単語の一部（英数字が隣接）なら適用しない
+            if (starts_alnum and _is_alnum_ascii(before)) or (ends_alnum and _is_alnum_ascii(after)):
+                continue
+            # この出現位置に転写（最初の有効な出現のみ。位置指定で確実に置換）
+            text = text[:s] + f"{word}({ruby_dict[word]})" + text[e:]
+            break
     return text
+
+
+def _thumbnail_hook(title_ja: str, limit: int = 22) -> str:
+    """サムネイル用の短いフック見出しを記事タイトルから作る.
+
+    長い記事タイトル全文はサムネで読みづらいため、最初の文の切れ目
+    （？！。）で切ってパンチのある見出しにする。早い位置に区切りが
+    無ければ読点で、それも無ければ limit 文字で省略する。
+    """
+    t = (title_ja or "").strip()
+    if len(t) <= limit:
+        return t
+    for i, ch in enumerate(t):
+        if ch in "？！?!" and 4 <= i <= limit:
+            return t[: i + 1]
+    for i, ch in enumerate(t):
+        if ch in "。、" and 8 <= i <= limit:
+            return t[:i]
+    return t[:limit].rstrip("、。 ") + "…"
 
 
 def _parse_keyword_items(body: str) -> list[dict]:
@@ -217,6 +280,8 @@ def render_slide_html(
     ponte_expressions: dict[str, str] | None = None,
     news_counter: int = 0,
     og_image: str = "",
+    source_label: str = "",
+    news_total: int = 0,
 ) -> str:
     """Render a single slide to HTML."""
     env = jinja2.Environment(
@@ -244,11 +309,16 @@ def render_slide_html(
 
     # セリフ中のルビ記法を辞書化 → タイトルの漢字に適用（手修正を優先）
     from script_generator import add_ruby_to_text
-    serif_text = slide["serif"][:300] if slide["serif"] else ""
+    # NOTE: 以前はルビ括弧込みの生テキストを300文字で切っていたため、ルビの多い
+    # セリフが「決定(けってい」のように途中で欠けていた。文字数はscript_generator側で
+    # 制御済みなので切らない（表示側は text_len に応じたフォント縮小で吸収する）。
+    serif_text = slide["serif"] or ""
     ruby_dict = _extract_ruby_dict(serif_text)
     title_with_ruby = _apply_ruby_dict(slide["title"], ruby_dict)
     title_html = apply_ruby(add_ruby_to_text(title_with_ruby))
     text_html = apply_ruby(serif_text)
+    # ルビ・記号を除いた表示文字数（テンプレート側の長文フォント縮小判定に使う）
+    text_len = len(_RUBY_RE.sub(lambda m: m.group(1) or m.group(3) or "", serif_text))
 
     # Apply ruby to keyword items
     rendered_keywords = []
@@ -282,6 +352,9 @@ def render_slide_html(
         og_image=og_image,
         ending_message=ending_message_html,
         day_class=day_class,
+        source_label=source_label,
+        news_total=news_total,
+        text_len=text_len,
     )
 
 
@@ -307,8 +380,15 @@ async def generate_slides_async(
     config_path: Path = Path("config.json"),
     date_str: str = "",
     shorts: bool = False,
+    template_override: Path | None = None,
+    out_subdir: str | None = None,
+    news_json_override: Path | None = None,
 ) -> Path:
-    """Generate all slide images from a script. Returns images directory."""
+    """Generate all slide images from a script. Returns images directory.
+
+    template_override / out_subdir / news_json_override は UI プレビュー用の
+    後方互換オプション（未指定時は従来動作）。本番パイプラインからは使わない。
+    """
     from playwright.async_api import async_playwright
 
     config = load_config(config_path)
@@ -321,6 +401,9 @@ async def generate_slides_async(
     else:
         template_path = templates_dir / "slide.html"
         resolution = config.get("video", {}).get("resolution", [1920, 1080])
+
+    if template_override is not None:
+        template_path = template_override
 
     if date_str:
         config["_date"] = date_str
@@ -336,25 +419,47 @@ async def generate_slides_async(
         config["_date_display"] = config["_date"]
 
     slides = parse_slides(script_path)
-    images_dir = state_dir / ("images_shorts" if shorts else "images")
+    images_dir = state_dir / (out_subdir or ("images_shorts" if shorts else "images"))
     images_dir.mkdir(parents=True, exist_ok=True)
 
-    # Shortsではインデックススライドのみスキップ（キーワードは残す）
+    # per_topicモードでは旧レンダリングの残骸PNG（採用外のスライド番号）が
+    # レビュー時の混乱を招くため、レンダリング前に削除する
+    if shorts and config.get("shorts", {}).get("per_topic", False) and out_subdir is None:
+        for old_png in images_dir.glob("slide_*.png"):
+            old_png.unlink()
+
+    # Shorts: video_builder と同じ選定ロジックを実行し、採用スライドのみレンダリングする。
+    # （両者とも同じ parse_slides 結果＋同じ設定から決定的に計算するため一致する）
+    # - per_topic モード: 「1ニュース=1本」。トップN記事のユニットのみ
+    #   （オープニング・インデックス・キーワード・エンディングなし）
+    # - レガシーモード: 尺予算によるダイジェスト選定
+    per_topic = False
     if shorts:
-        slides = [s for s in slides if not s.get("is_index")]
+        shorts_cfg = config.get("shorts", {})
+        if shorts_cfg.get("per_topic", False):
+            from video_builder import select_topic_units
+            units = select_topic_units(slides, shorts_cfg.get("topics_per_day", 3))
+            slides = [s for unit in units for s in unit]
+            per_topic = True
+        else:
+            from video_builder import select_shorts_slides
+            max_sec = config.get("video", {}).get("shorts_max_duration_sec", 170)
+            slides = select_shorts_slides(slides, max_sec)
 
     # Load expression images once
     ponte_expressions = _load_ponte_expressions(config)
 
-    # Load OG images from news JSON (keyed by 1-based article index)
+    # Load OG images + 出典ドメイン from news JSON (keyed by 1-based article index)
     og_images: dict[int, str] = {}
+    source_labels: dict[int, str] = {}
     date_key = config.get("_date", date_str)
-    news_json_path = state_dir / f"news_{date_key}.json"
+    news_json_path = news_json_override or (state_dir / f"news_{date_key}.json")
     if news_json_path.exists():
         import json as _json
         with open(news_json_path, encoding="utf-8") as f:
             news_data = _json.load(f)
         for idx, article in enumerate(news_data.get("articles", []), 1):
+            source_labels[idx] = article.get("source_domain") or ""
             og_path = article.get("og_image", "")
             if og_path:
                 og_file = Path(og_path)
@@ -379,6 +484,12 @@ async def generate_slides_async(
     # Track which article number we're on (each article = 2 slides: intro + point)
     article_index = 0
 
+    # このデッキ内の記事数（紹介スライドの数 = ヘッダーの「n/M」表示の分母）
+    news_total = sum(
+        1 for s in slides
+        if classify_slide(s, len(slides)) == "news" and not s["title"].endswith("ポイント")
+    )
+
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page(
@@ -399,19 +510,27 @@ async def generate_slides_async(
             # OG image for this article (show on both intro and explanation slides)
             og_image = og_images.get(article_index, "") if slide_type == "news" else ""
 
+            # 出典バッジ（記事ページのドメイン名）
+            source_label = source_labels.get(article_index, "") if slide_type == "news" else ""
+
             # Parse keyword items from markdown body for keyword slides
             kw_items = None
             if slide_type == "keyword":
                 kw_items = _parse_keyword_items(slide.get("body", ""))
 
+            # per_topic モードでは各動画が単体で完結するため、
+            # ニュース番号・進捗「n/M」は表示しない（0で非表示）
             html = render_slide_html(
-                slide, slide_type, template_path, config, news_counter,
+                slide, slide_type, template_path, config,
+                0 if per_topic else article_index,
                 index_items=news_titles if slide_type == "index" else None,
                 keyword_items=kw_items,
                 bg_variant=bg_variant,
                 ponte_expressions=ponte_expressions,
                 news_counter=news_counter,
                 og_image=og_image,
+                source_label=source_label,
+                news_total=0 if per_topic else news_total,
             )
 
             await page.set_content(html, wait_until="networkidle")
@@ -434,6 +553,112 @@ def generate_slides(
     """Synchronous wrapper for slide generation."""
     import asyncio
     return asyncio.run(generate_slides_async(script_path, config_path, date_str, shorts))
+
+
+# ---------------------------------------------------------------------------
+# Custom thumbnail (1280x720 JPEG for YouTube)
+# ---------------------------------------------------------------------------
+
+async def generate_thumbnail_async(
+    date_str: str,
+    config_path: Path = Path("config.json"),
+    template_override: Path | None = None,
+    news_json_override: Path | None = None,
+    out_override: Path | None = None,
+    force: bool = False,
+) -> Path | None:
+    """トップ記事のカスタムサムネイル（1280x720 JPEG）を生成する.
+
+    config.youtube.custom_thumbnail が false の場合や news JSON が無い場合は
+    None を返す（サムネイルなしでもアップロードは成立する）。
+
+    template_override / news_json_override / out_override / force は UI プレビュー用の
+    後方互換オプション（未指定時は従来動作）。
+    """
+    config = load_config(config_path)
+    if not force and not config.get("youtube", {}).get("custom_thumbnail", False):
+        return None
+
+    state_dir = Path(config["paths"]["state_dir"])
+    templates_dir = Path(config["paths"]["templates_dir"])
+    template_path = template_override or (templates_dir / "thumbnail.html")
+    if not template_path.exists():
+        logger.warning("Thumbnail template not found: %s", template_path)
+        return None
+
+    news_json_path = news_json_override or (state_dir / f"news_{date_str}.json")
+    if not news_json_path.exists():
+        logger.warning("News JSON not found for thumbnail: %s", news_json_path)
+        return None
+    with open(news_json_path, encoding="utf-8") as f:
+        news_data = json.load(f)
+    articles = news_data.get("articles", [])
+    if not articles:
+        return None
+    top = articles[0]
+
+    # トップ記事タイトル → サムネ用の短いフック見出し（ルビ付き）
+    from script_generator import add_ruby_to_text
+    title = _thumbnail_hook(top.get("title_ja", top.get("title", "")))
+    title_html = apply_ruby(add_ruby_to_text(title))
+
+    # OG画像（背景用）
+    og_image = ""
+    og_path = top.get("og_image", "")
+    if og_path and Path(og_path).exists():
+        og_file = Path(og_path)
+        img_data = base64.b64encode(og_file.read_bytes()).decode()
+        suffix = og_file.suffix.lstrip(".")
+        mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "webp": "webp"}.get(suffix, "jpeg")
+        og_image = f"data:image/{mime};base64,{img_data}"
+
+    # ポンテ画像（normal）
+    ponte_expressions = _load_ponte_expressions(config)
+    ponte_image = ponte_expressions.get("normal", "")
+
+    channel = config.get("channel", {})
+    try:
+        date_display = format_date_display(date_str)
+    except (ValueError, KeyError):
+        date_display = date_str
+
+    env = jinja2.Environment(
+        loader=jinja2.FileSystemLoader(str(template_path.parent)),
+        autoescape=False,
+    )
+    html = env.get_template(template_path.name).render(
+        title=title_html,
+        og_image=og_image,
+        ponte_image=ponte_image,
+        channel_name=channel.get("name", "ポンテのAI教室"),
+        tagline=channel.get("tagline", "むずかしいAIを、かんたんに。"),
+        date=date_display,
+        day_class=get_day_class(date_str),
+        news_count=len(articles),
+        topic=news_data.get("topic", "AI"),
+    )
+
+    output_path = out_override or (state_dir / f"thumbnail_{date_str}.jpg")
+    from playwright.async_api import async_playwright
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page(viewport={"width": 1280, "height": 720})
+        await page.set_content(html, wait_until="networkidle")
+        # YouTubeサムネイルは2MB制限のためJPEGで出力
+        await page.screenshot(path=str(output_path), type="jpeg", quality=90, full_page=False)
+        await browser.close()
+
+    logger.info("Generated thumbnail: %s", output_path)
+    return output_path
+
+
+def generate_thumbnail(
+    date_str: str,
+    config_path: Path = Path("config.json"),
+) -> Path | None:
+    """Synchronous wrapper for thumbnail generation."""
+    import asyncio
+    return asyncio.run(generate_thumbnail_async(date_str, config_path))
 
 
 def main() -> None:

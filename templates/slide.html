@@ -6,19 +6,11 @@
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body {
-  width: 1920px;
-  height: 1080px;
+  width: 1920px; height: 1080px;
   font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif;
   overflow: hidden;
 }
-
-.slide {
-  width: 1920px;
-  height: 1080px;
-  position: relative;
-  display: flex;
-  flex-direction: column;
-}
+.slide { width: 1920px; height: 1080px; position: relative; display: flex; flex-direction: column; }
 
 /* --- Day-of-week theme colors --- */
 .day-mon { --day-grad-start: #1565c0; --day-grad-end: #42a5f5; --day-accent: #1976d2; }
@@ -29,307 +21,236 @@ body {
 .day-sat { --day-grad-start: #6a1b9a; --day-grad-end: #ab47bc; --day-accent: #7b1fa2; }
 .day-sun { --day-grad-start: #c62828; --day-grad-end: #ef5350; --day-accent: #d32f2f; }
 
-/* --- Opening / Ending --- */
-.slide--opening, .slide--ending {
-  background: linear-gradient(135deg, var(--day-grad-start, #667eea) 0%, var(--day-grad-end, #764ba2) 100%);
-  justify-content: center;
-  align-items: center;
-  text-align: center;
-  color: white;
+/* derived palette */
+.slide {
+  --board: color-mix(in srgb, var(--day-accent, #388e3c) 26%, #16251c);
+  --paper: #f7f1e1;
+  --rule: #cdd9ec;
+  --margin: #e8a0a0;
+  --ink: #34302a;
+  --chalk: #f3f5ee;
+  --marker: color-mix(in srgb, var(--day-grad-end, #66bb6a) 20%, #ffe27a);
+  --tape: rgba(255, 233, 150, 0.66);
+  --wood-a: #74471f; --wood-b: #b9854b;
 }
-.slide--opening .logo { font-size: 80px; margin-bottom: 20px; }
-.slide--opening .channel-name { font-size: 64px; font-weight: 900; margin-bottom: 16px; }
-.slide--opening .tagline { font-size: 36px; opacity: 0.9; }
-.slide--opening .date { font-size: 48px; font-weight: 700; opacity: 1.0; margin-top: 32px; }
-.slide--ending .message { font-size: 48px; font-weight: 700; }
-.slide--ending .sub { font-size: 32px; opacity: 0.8; margin-top: 16px; }
+
+/* ===== Chalkboard surface (opening / index / ending) ===== */
+.board {
+  position: absolute; inset: 0;
+  background-color: var(--board);
+  background-image:
+    radial-gradient(ellipse at 22% 28%, rgba(255,255,255,.06), transparent 45%),
+    radial-gradient(ellipse at 78% 76%, rgba(255,255,255,.05), transparent 45%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  /* wooden frame */
+  border: 26px solid;
+  border-image: linear-gradient(135deg, var(--wood-b) 0%, var(--wood-a) 45%, #5e3917 55%, var(--wood-b) 100%) 1;
+  box-shadow: inset 0 0 0 4px rgba(0,0,0,.3), inset 0 0 90px rgba(0,0,0,.45);
+}
+/* chalk doodle layer for blackboard slides */
+.slide--opening .board::after,
+.slide--index .board::after,
+.slide--ending .board::after {
+  content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: .6;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1920' height='1080' fill='none' stroke='%23f3f5ee' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='54' y='54' width='1812' height='972' rx='30' stroke-dasharray='2 16' opacity='0.55'/%3E%3Cpath d='M1742 150 l7 17 17 7 -17 7 -7 17 -7 -17 -17 -7 17 -7 z' fill='%23f3f5ee' stroke='none'/%3E%3Cpath d='M1826 232 l4 11 11 4 -11 4 -4 11 -4 -11 -11 -4 11 -4 z' fill='%23f3f5ee' stroke='none'/%3E%3Ccircle cx='1688' cy='238' r='5' fill='%23f3f5ee' stroke='none'/%3E%3Cpath d='M150 884 q42 -42 92 -12'/%3E%3Cpath d='M242 872 l2 14 -14 -3'/%3E%3Ccircle cx='126' cy='930' r='5' fill='%23f3f5ee' stroke='none'/%3E%3C/svg%3E") no-repeat center/cover;
+}
+.board-inner {
+  position: absolute; inset: 0; z-index: 2;
+  display: flex; flex-direction: column;
+  color: var(--chalk);
+}
+.chalk { font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; color: var(--chalk); text-shadow: 0 1px 0 rgba(255,255,255,.18), 0 0 14px rgba(255,255,255,.10); }
+.chalk-underline { position: relative; }
+.chalk-underline::after {
+  content: ""; position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: -16px; width: 70%; height: 10px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='12' viewBox='0 0 300 12'%3E%3Cpath d='M4 7 Q80 1 150 6 T296 5' stroke='%23f3f5ee' stroke-width='4' fill='none' stroke-linecap='round' opacity='0.85'/%3E%3C/svg%3E") no-repeat center/100% 100%;
+}
+
+/* --- Opening / Ending --- */
+.slide--opening .board-inner, .slide--ending .board-inner { justify-content: center; align-items: center; text-align: center; }
+.slide--opening .opening-ponte { width: 280px; height: auto; margin-bottom: 22px; filter: drop-shadow(0 8px 18px rgba(0,0,0,.35)); }
+.slide--opening .channel-name { font-size: 92px; font-weight: 600; margin-bottom: 26px; letter-spacing: 2px; }
+.slide--opening .tagline { font-size: 38px; opacity: .92; }
+.slide--opening .date-chalk { font-size: 44px; margin-top: 40px; opacity: .95; }
+.slide--ending .ending-ponte { width: 250px; height: auto; margin-bottom: 24px; filter: drop-shadow(0 8px 18px rgba(0,0,0,.35)); }
+.slide--ending .message { font-size: 84px; font-weight: 600; }
+.slide--ending .sub { font-size: 36px; opacity: .85; margin-top: 22px; }
+.deco-tag {
+  position: absolute; top: 26px; left: 34px; z-index: 3;
+  font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; color: var(--chalk); font-size: 30px; opacity: .85;
+  border: 2px dashed rgba(243,245,238,.5); border-radius: 12px; padding: 6px 18px;
+}
 
 /* --- Index slide --- */
-.slide--index {
-  background: linear-gradient(135deg, var(--day-grad-start, #667eea) 0%, var(--day-grad-end, #764ba2) 100%);
-  color: white;
-}
 .slide--index .index-header {
-  text-align: center;
-  padding: 48px 60px 24px;
-  font-size: 48px;
-  font-weight: 900;
+  text-align: center; padding: 56px 60px 30px; font-size: 60px; font-weight: 600;
 }
-.slide--index .index-body {
-  flex: 1;
-  display: flex;
-  padding: 0 80px 48px;
-  gap: 48px;
-}
-.slide--index .index-list {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  gap: 20px;
-}
+.slide--index .index-body { flex: 1; display: flex; padding: 8px 80px 56px; gap: 40px; }
+.slide--index .index-list { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 22px; }
 .slide--index .index-item {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  background: rgba(255,255,255,0.15);
-  border-radius: 16px;
-  padding: 20px 32px;
-  font-size: 32px;
-  font-weight: 700;
-  line-height: 1.4;
+  display: flex; align-items: center; gap: 24px;
+  font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; font-size: 36px; font-weight: 400; line-height: 1.35;
+  color: var(--chalk); text-shadow: 0 0 12px rgba(255,255,255,.08);
 }
 .slide--index .index-item .item-number {
-  background: rgba(255,255,255,0.3);
-  border-radius: 50%;
-  min-width: 56px;
-  height: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 32px;
-  font-weight: 900;
+  flex-shrink: 0; width: 60px; height: 60px; border-radius: 50%;
+  border: 3px solid var(--chalk); display: flex; align-items: center; justify-content: center;
+  font-size: 34px; font-weight: 600;
 }
-.slide--index .ponte-area {
-  width: 320px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
+.slide--index .index-item .item-text { border-bottom: 2px dotted rgba(243,245,238,.4); padding-bottom: 6px; flex: 1; }
+.slide--index .ponte-area { width: 300px; display: flex; align-items: flex-end; justify-content: center; }
+.slide--index .ponte-img { max-width: 270px; max-height: 360px; filter: drop-shadow(0 8px 18px rgba(0,0,0,.3)); }
+
+/* ===== Paper surface (news / keyword) ===== */
+.slide--news, .slide--keyword {
+  background-color: var(--paper);
+  background-image:
+    repeating-linear-gradient(transparent, transparent 53px, var(--rule) 53px, var(--rule) 55px),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.4 0 0 0 0 0.34 0 0 0 0 0.2 0 0 0 0.04 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23p)'/%3E%3C/svg%3E");
 }
-.slide--index .ponte-img {
-  max-width: 280px;
-  max-height: 360px;
+.slide--news::before, .slide--keyword::before {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 96px; width: 3px;
+  background: var(--margin); opacity: .65; z-index: 0;
 }
 
 /* --- News slide --- */
-.slide--news {
-  background: linear-gradient(180deg, #f0f4ff 0%, #ffffff 100%);
-}
-/* Light tinted backgrounds per article - using day theme's accent color */
-.slide--news.bg-1 { background: linear-gradient(180deg, color-mix(in srgb, var(--day-grad-end, #667eea) 12%, white) 0%, #ffffff 100%); }
-.slide--news.bg-2 { background: linear-gradient(180deg, color-mix(in srgb, var(--day-grad-end, #667eea) 18%, white) 0%, #ffffff 100%); }
-.slide--news.bg-3 { background: linear-gradient(180deg, color-mix(in srgb, var(--day-grad-end, #667eea) 12%, white) 0%, #ffffff 100%); }
-.slide--news.bg-4 { background: linear-gradient(180deg, color-mix(in srgb, var(--day-grad-end, #667eea) 18%, white) 0%, #ffffff 100%); }
-.slide--news.bg-5 { background: linear-gradient(180deg, color-mix(in srgb, var(--day-grad-end, #667eea) 12%, white) 0%, #ffffff 100%); }
-
 .slide--news .header {
-  background: linear-gradient(90deg, var(--day-grad-start, #667eea), var(--day-grad-end, #764ba2));
-  color: white;
-  padding: 32px 60px;
-  font-size: 28px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  gap: 16px;
+  position: relative; z-index: 1;
+  background: linear-gradient(100deg, var(--board), color-mix(in srgb, var(--day-accent,#388e3c) 40%, #1c2f24));
+  color: var(--chalk); padding: 22px 56px 22px 60px;
+  display: flex; align-items: center; gap: 18px;
+  font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; font-size: 30px; font-weight: 600;
+  box-shadow: 0 4px 12px rgba(0,0,0,.18);
 }
-
 .slide--news .header .news-number {
-  background: rgba(255,255,255,0.3);
-  border-radius: 50%;
-  width: 56px;
-  height: 56px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 32px;
-  font-weight: 900;
+  flex-shrink: 0; width: 58px; height: 58px; border-radius: 50%;
+  border: 3px solid var(--chalk); background: rgba(255,255,255,.08);
+  display: flex; align-items: center; justify-content: center; font-size: 32px; font-weight: 600;
 }
-.slide--news .body {
-  flex: 1;
-  display: flex;
-  padding: 32px 60px;
-  gap: 36px;
+.slide--news .header .header-right { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+.slide--news .header .news-progress {
+  background: rgba(255,255,255,.16); border: 2px solid rgba(255,255,255,.3);
+  border-radius: 999px; padding: 6px 22px; font-size: 26px;
 }
-.slide--news .content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
+.slide--news .header .source-badge {
+  background: var(--tape); color: #5b4a1e; border-radius: 6px;
+  padding: 8px 20px; font-size: 23px; font-weight: 700;
+  transform: rotate(-2deg); box-shadow: 0 2px 6px rgba(0,0,0,.2);
+  font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif;
 }
+.slide--news .body { flex: 1; display: flex; padding: 38px 64px 38px 130px; gap: 40px; position: relative; z-index: 1; }
+.slide--news .content { flex: 1; display: flex; flex-direction: column; justify-content: center; min-width: 0; }
 .slide--news .title {
-  font-size: 46px;
-  font-weight: 900;
-  color: #1a1a2e;
-  line-height: 1.4;
-  margin-bottom: 20px;
+  font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; font-size: 50px; font-weight: 600;
+  color: var(--ink); line-height: 1.75; margin-bottom: 26px;
+  display: inline; box-decoration-break: clone; -webkit-box-decoration-break: clone;
+  background: linear-gradient(transparent 66%, var(--marker) 66%, var(--marker) 92%, transparent 92%);
+  padding: 0 4px;
 }
-/* Speech bubble style for text */
+.slide--news .title-wrap { margin-bottom: 26px; }
 .slide--news .bubble {
-  background: #fff;
-  border-radius: 24px;
-  padding: 24px 32px;
-  position: relative;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.08);
-  font-size: 30px;
-  color: #333;
-  line-height: 1.7;
+  position: relative; background: #fffdf6; border: 2.5px dashed color-mix(in srgb, var(--day-accent,#388e3c) 40%, #b8a98a);
+  border-radius: 18px; padding: 26px 34px; font-size: 31px; color: var(--ink); line-height: 1.75;
+  box-shadow: 3px 4px 0 rgba(0,0,0,.06);
 }
-.slide--news .bubble::after {
-  content: "";
-  position: absolute;
-  right: -20px;
-  bottom: 40px;
-  border: 16px solid transparent;
-  border-left-color: #fff;
+.slide--news .bubble::before {
+  content: "📝"; position: absolute; top: -22px; left: 26px;
+  background: var(--tape); padding: 4px 16px; border-radius: 4px; font-size: 22px;
+  transform: rotate(-3deg); box-shadow: 0 2px 4px rgba(0,0,0,.15);
 }
-.slide--news .text {
-  font-size: 30px;
-  color: #333;
-  line-height: 1.7;
-}
-/* OG image on the right half */
+/* OG image: photo taped into the notebook */
 .slide--news .og-image-area {
-  width: 50%;
-  flex-shrink: 0;
-  border-radius: 16px;
-  overflow: hidden;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.12);
-  display: flex;
-  align-items: center;
-  background: #f5f5f5;
+  width: 48%; flex-shrink: 0; align-self: center; position: relative;
+  background: #fff; padding: 14px 14px 46px; border-radius: 4px;
+  box-shadow: 0 10px 26px rgba(0,0,0,.18); transform: rotate(1.6deg);
 }
-.slide--news .og-img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  display: block;
+.slide--news .og-image-area::after {
+  content: ""; position: absolute; top: -16px; left: 50%; transform: translateX(-50%) rotate(-2deg);
+  width: 150px; height: 36px; background: var(--tape); box-shadow: 0 2px 6px rgba(0,0,0,.15);
 }
-/* Ponte: small overlay at bottom-left of content when OG image is present */
-.slide--news .ponte-area {
-  width: 300px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.slide--news .ponte-img {
-  max-width: 280px;
-  max-height: 350px;
-}
-/* When OG image is shown, shrink ponte into a small overlay */
-.slide--news .ponte-area--small {
-  position: absolute;
-  bottom: 70px;
-  left: 60px;
-  width: auto;
-}
-.slide--news .ponte-area--small .ponte-img {
-  max-width: 160px;
-  max-height: 200px;
-}
+.slide--news .og-img-frame { width: 100%; aspect-ratio: 16/10; border-radius: 2px; overflow: hidden; background: #f0ebdd; position: relative; }
+.slide--news .og-img-bg { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; filter: blur(20px); transform: scale(1.15); opacity: .5; }
+.slide--news .og-img { position: relative; z-index: 1; width: 100%; height: 100%; object-fit: contain; display: block; }
+.slide--news .photo-caption { position: absolute; bottom: 12px; left: 0; right: 0; text-align: center; font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; font-size: 20px; color: #8a7f68; }
+.slide--news .ponte-area { width: 280px; display: flex; align-items: flex-end; justify-content: center; flex-shrink: 0; }
+.slide--news .ponte-area .ponte-img { max-width: 260px; max-height: 340px; filter: drop-shadow(0 8px 16px rgba(0,0,0,.18)); }
+.slide--news .ponte-area--small { position: absolute; bottom: 64px; left: 96px; width: auto; z-index: 2; }
+.slide--news .ponte-area--small .ponte-img { max-width: 150px; max-height: 190px; filter: drop-shadow(0 8px 16px rgba(0,0,0,.18)); }
 
 /* --- Footer --- */
 .footer {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 60px;
-  background: color-mix(in srgb, var(--day-accent, #667eea) 10%, white);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 60px;
-  font-size: 22px;
-  color: var(--day-accent, #667eea);
+  position: absolute; bottom: 0; left: 0; right: 0; height: 56px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 60px 0 130px; font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; font-size: 23px;
+  color: color-mix(in srgb, var(--day-accent,#388e3c) 70%, #5a4f3a); z-index: 1;
 }
 
 /* --- Ruby --- */
 ruby { ruby-position: over; }
-rt { font-size: 0.45em; font-weight: 400; color: inherit; }
+rt { font-size: 0.42em; font-weight: 400; color: inherit; opacity: .92; }
 
 /* --- Keyword slide --- */
-.slide--keyword {
-  background: linear-gradient(135deg, #fff3cd 0%, #ffe0b2 100%);
-}
 .slide--keyword .keyword-header {
-  text-align: center;
-  padding: 48px 60px 24px;
-  font-size: 52px;
-  font-weight: 900;
-  color: #c62828;
+  text-align: center; padding: 52px 60px 30px;
+  font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; font-size: 58px; font-weight: 600;
+  color: var(--ink); position: relative; z-index: 1;
 }
-.slide--keyword .keyword-body {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 0 80px 48px;
-  gap: 24px;
-}
+.slide--keyword .keyword-header .kw-emoji { filter: drop-shadow(0 2px 2px rgba(0,0,0,.15)); }
+.slide--keyword .keyword-body { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 0 90px 60px 140px; gap: 26px; position: relative; z-index: 1; }
 .slide--keyword .keyword-card {
-  background: rgba(255,255,255,0.85);
-  border-radius: 20px;
-  padding: 24px 36px;
-  display: flex;
-  align-items: baseline;
-  gap: 20px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  background: #fffdf6; border-radius: 16px; padding: 24px 32px; display: flex; align-items: center; gap: 26px;
+  box-shadow: 3px 4px 0 rgba(0,0,0,.06); border: 2px solid #e8ddc4;
 }
 .slide--keyword .keyword-term {
-  font-size: 36px;
-  font-weight: 800;
-  color: #c62828;
-  white-space: nowrap;
+  flex-shrink: 0; font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; font-size: 36px; font-weight: 600; color: #fff;
+  background: linear-gradient(135deg, var(--day-grad-start,#2e7d32), var(--day-grad-end,#66bb6a));
+  border-radius: 12px; padding: 12px 26px; white-space: nowrap; box-shadow: 0 3px 0 rgba(0,0,0,.12);
 }
-.slide--keyword .keyword-desc {
-  font-size: 30px;
-  color: #333;
-  line-height: 1.6;
-}
+.slide--keyword .keyword-desc { font-size: 31px; color: var(--ink); line-height: 1.6; }
 
-/* Ponte placeholder when no image */
-.ponte-placeholder {
-  width: 200px;
-  height: 200px;
-  background: linear-gradient(135deg, #a8edea, #fed6e3);
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 80px;
-}
+/* Ponte placeholder */
+.ponte-placeholder { width: 200px; height: 200px; background: linear-gradient(135deg,#a8edea,#fed6e3); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 80px; }
 </style>
 </head>
 <body>
 
 {% if slide_type == "opening" %}
 <div class="slide slide--opening {{ day_class }}">
-  {% if ponte_image %}
-  <img src="{{ ponte_image }}" alt="ポンテ" style="width: 280px; height: auto; margin-bottom: 24px;">
-  {% else %}
-  <div class="logo">🤖</div>
-  {% endif %}
-  <div class="channel-name">{{ channel_name }}</div>
-  <div class="tagline">{{ tagline }}</div>
-  <div class="date">{{ date }}</div>
+  <div class="board"></div>
+  <div class="board-inner">
+    <div class="deco-tag">{{ date }}</div>
+    {% if ponte_image %}<img src="{{ ponte_image }}" alt="ポンテ" class="opening-ponte">{% endif %}
+    <div class="channel-name chalk chalk-underline">{{ channel_name }}</div>
+    <div class="tagline chalk">{{ tagline }}</div>
+    <div class="date-chalk chalk">{{ date }}</div>
+  </div>
 </div>
 
 {% elif slide_type == "index" %}
 <div class="slide slide--index {{ day_class }}">
-  <div class="index-header">{{ index_heading | default("TODAY'S AI NEWS") }}</div>
-  <div class="index-body">
-    <div class="index-list">
-      {% for item in index_items %}
-      <div class="index-item">
-        <div class="item-number">{{ loop.index }}</div>
-        <span>{{ item }}</span>
+  <div class="board"></div>
+  <div class="board-inner">
+    <div class="index-header chalk chalk-underline">今日のAIニュース</div>
+    <div class="index-body">
+      <div class="index-list">
+        {% for item in index_items %}
+        <div class="index-item">
+          <div class="item-number">{{ loop.index }}</div>
+          <span class="item-text">{{ item }}</span>
+        </div>
+        {% endfor %}
       </div>
-      {% endfor %}
-    </div>
-    <div class="ponte-area">
-      {% if ponte_image %}
-      <img class="ponte-img" src="{{ ponte_image }}" alt="ポンテ">
-      {% else %}
-      <div class="ponte-placeholder" style="width:160px;height:160px;font-size:60px;">🤖</div>
-      {% endif %}
+      <div class="ponte-area">
+        {% if ponte_image %}<img class="ponte-img" src="{{ ponte_image }}" alt="ポンテ">{% endif %}
+      </div>
     </div>
   </div>
 </div>
 
 {% elif slide_type == "keyword" %}
 <div class="slide slide--keyword {{ day_class }}">
-  <div class="keyword-header">📖 今日のキーワード</div>
+  <div class="keyword-header"><span class="kw-emoji">📖</span> 今日のキーワード</div>
   <div class="keyword-body">
     {% for kw in keyword_items %}
     <div class="keyword-card">
@@ -338,57 +259,52 @@ rt { font-size: 0.45em; font-weight: 400; color: inherit; }
     </div>
     {% endfor %}
   </div>
-  <div class="footer" style="background: rgba(198, 40, 40, 0.1); color: #c62828;">
-    <span>{{ channel_name }}</span>
-    <span>{{ date }}</span>
-  </div>
+  <div class="footer"><span>{{ channel_name }}</span><span>{{ date }}</span></div>
 </div>
 
 {% elif slide_type == "ending" %}
 <div class="slide slide--ending {{ day_class }}">
-  {% if ponte_image %}
-  <img src="{{ ponte_image }}" alt="ポンテ" style="width: 240px; height: auto; margin-bottom: 24px;">
-  {% else %}
-  <div class="logo" style="font-size:80px; margin-bottom:24px;">🤖</div>
-  {% endif %}
-  <div class="message">{{ ending_message | default("また明日ね！") }}</div>
-  <div class="sub">チャンネル登録・いいね、よろしくね！</div>
+  <div class="board"></div>
+  <div class="board-inner">
+    {% if ponte_image %}<img src="{{ ponte_image }}" alt="ポンテ" class="ending-ponte">{% endif %}
+    <div class="message chalk">{{ ending_message }}</div>
+    <div class="sub chalk">チャンネル登録・いいね、よろしくね！</div>
+  </div>
 </div>
 
 {% else %}
 <div class="slide slide--news {{ bg_variant }} {{ day_class }}">
   <div class="header">
     <div class="news-number">{{ news_number }}</div>
-    <span>{{ header_label | default("TODAY'S AI NEWS") }}</span>
+    <span>今日のAIニュース</span>
+    <div class="header-right">
+      {% if news_total %}<span class="news-progress">ニュース {{ news_number }}/{{ news_total }}</span>{% endif %}
+      {% if source_label %}<span class="source-badge">{{ source_label }} より</span>{% endif %}
+    </div>
   </div>
   <div class="body">
     <div class="content">
-      <div class="title">{{ title }}</div>
+      <div class="title-wrap"><span class="title">{{ title }}</span></div>
       <div class="bubble">{{ text }}</div>
     </div>
     {% if og_image %}
     <div class="og-image-area">
-      <img class="og-img" src="{{ og_image }}" alt="記事画像">
+      <div class="og-img-frame">
+        <img class="og-img-bg" src="{{ og_image }}" alt="">
+        <img class="og-img" src="{{ og_image }}" alt="記事画像">
+      </div>
+      <div class="photo-caption">― {{ source_label }} ―</div>
     </div>
     <div class="ponte-area--small">
-      {% if ponte_image %}
-      <img class="ponte-img" src="{{ ponte_image }}" alt="ポンテ">
-      {% endif %}
+      {% if ponte_image %}<img class="ponte-img" src="{{ ponte_image }}" alt="ポンテ">{% endif %}
     </div>
     {% else %}
     <div class="ponte-area">
-      {% if ponte_image %}
-      <img class="ponte-img" src="{{ ponte_image }}" alt="ポンテ">
-      {% else %}
-      <div class="ponte-placeholder">🤖</div>
-      {% endif %}
+      {% if ponte_image %}<img class="ponte-img" src="{{ ponte_image }}" alt="ポンテ">{% else %}<div class="ponte-placeholder">🤖</div>{% endif %}
     </div>
     {% endif %}
   </div>
-  <div class="footer">
-    <span>{{ channel_name }}</span>
-    <span>{{ date }}</span>
-  </div>
+  <div class="footer"><span>{{ channel_name }}</span><span>{{ date }}</span></div>
 </div>
 {% endif %}
 

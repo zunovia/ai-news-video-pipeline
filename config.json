@@ -5,30 +5,52 @@
       "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
       "https://feeds.technologyreview.com/technologyreview/ai/",
       "https://venturebeat.com/category/ai/feed/",
-      "https://www.wired.com/feed/tag/ai/latest/rss"
+      "https://www.wired.com/feed/tag/ai/latest/rss",
+      "https://feeds.arstechnica.com/arstechnica/technology-lab",
+      "https://blog.google/technology/ai/rss/",
+      "https://openai.com/blog/rss.xml",
+      "https://gigazine.net/news/rss_2.0/",
+      "https://rss.itmedia.co.jp/rss/2.0/aiplus.xml",
+      "https://www.publickey1.jp/atom.xml"
     ],
     "google_cse": {
       "api_key_env": "GOOGLE_CSE_API_KEY",
       "engine_id_env": "GOOGLE_CSE_ENGINE_ID",
-      "queries": ["AI news today", "artificial intelligence breakthrough"]
+      "queries": [
+        "AI news today",
+        "artificial intelligence breakthrough",
+        "AI robot children education",
+        "AI 最新ニュース 今日"
+      ]
     },
-    "max_articles": 30,
-    "top_n": 5
+    "max_articles": 50,
+    "top_n": 5,
+    "topic_dedup": true,
+    "exclude_keywords": [],
+    "cluster_pool_size": 15,
+    "fetch_full_text": true
   },
   "llm": {
-    "provider": "gemini",
+    "provider": "claude",
     "gemini": {
       "api_key_file": ".gemini_api_key",
       "model": "gemini-2.5-flash",
       "max_tokens_scoring": 200,
-      "max_tokens_script": 1500
+      "max_tokens_script": 8000,
+      "max_tokens_enrich": 1000
     },
     "claude": {
+      "auth_mode": "subscription",
       "api_key_env": "ANTHROPIC_API_KEY",
-      "model": "claude-sonnet-4-20250514",
+      "model": "claude-haiku-4-5",
       "max_tokens_scoring": 200,
-      "max_tokens_script": 1500
+      "max_tokens_script": 8000,
+      "max_tokens_enrich": 1000
     }
+  },
+  "script": {
+    "allow_fallback": true,
+    "max_estimated_sec": 205
   },
   "tts": {
     "provider": "voicevox",
@@ -36,20 +58,34 @@
     "voice": "",
     "speaking_rate": 1.0,
     "pitch": 0.0,
+    "credit": "VOICEVOX:冥鳴ひまり",
     "options": {
       "base_url": "http://localhost:50021",
       "speaker": 14
     }
   },
+  "pipeline": {
+    "daily_video_enabled": false
+  },
+  "shorts": {
+    "per_topic": true,
+    "topics_per_day": 3,
+    "max_topic_duration_sec": 75
+  },
   "video": {
     "resolution": [1920, 1080],
     "shorts_resolution": [1080, 1920],
+    "shorts_max_duration_sec": 170,
     "fps": 30,
     "silence_duration": 3.5,
     "padding_before": 0.3,
     "padding_after": 0.3,
     "transition": "crossfade",
-    "transition_duration": 0.5
+    "transition_duration": 0.5,
+    "motion": {
+      "enabled": true,
+      "max_zoom": 1.05
+    }
   },
   "bgm": {
     "enabled": true,
@@ -60,8 +96,9 @@
     "client_secrets_file": "client_secret.json",
     "token_file": "state/youtube_token.json",
     "default_category_id": "28",
-    "default_tags": ["AI", "人工知能", "AIニュース", "ポンテ", "AI教室", "小学生", "中学生"],
-    "initial_privacy": "private"
+    "default_tags": ["AI", "人工知能", "AIニュース", "生成AI", "AI活用", "AI入門", "初心者", "ポンテ", "AI教室"],
+    "initial_privacy": "private",
+    "custom_thumbnail": true
   },
   "paths": {
     "video_engine_dir": "../911-plan",
@@ -74,6 +111,6 @@
     "name": "ポンテのAI教室",
     "character": "ポンテ",
     "tagline": "むずかしいAIを、かんたんに。",
-    "target_audience": "小中学生＋保護者"
+    "target_audience": "AI初心者の大人（専門知識のない人にやさしく解説）"
   }
 }

@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1080, height=1920">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1080px; height: 1920px; font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; overflow: hidden; }
+.slide { width: 1080px; height: 1920px; position: relative; display: flex; flex-direction: column; }
+
+.day-mon { --day-grad-start: #1565c0; --day-grad-end: #42a5f5; --day-accent: #1976d2; }
+.day-tue { --day-grad-start: #2e7d32; --day-grad-end: #66bb6a; --day-accent: #388e3c; }
+.day-wed { --day-grad-start: #00695c; --day-grad-end: #4db6ac; --day-accent: #00796b; }
+.day-thu { --day-grad-start: #e65100; --day-grad-end: #ffa726; --day-accent: #ef6c00; }
+.day-fri { --day-grad-start: #c2185b; --day-grad-end: #f06292; --day-accent: #d81b60; }
+.day-sat { --day-grad-start: #6a1b9a; --day-grad-end: #ab47bc; --day-accent: #7b1fa2; }
+.day-sun { --day-grad-start: #c62828; --day-grad-end: #ef5350; --day-accent: #d32f2f; }
+
+.slide {
+  --board: color-mix(in srgb, var(--day-accent, #388e3c) 26%, #16251c);
+  --paper: #f7f1e1; --rule: #cdd9ec; --margin: #e8a0a0; --ink: #34302a; --chalk: #f3f5ee;
+  --marker: color-mix(in srgb, var(--day-grad-end, #66bb6a) 20%, #ffe27a);
+  --tape: rgba(255, 233, 150, 0.66); --wood-a: #74471f; --wood-b: #b9854b;
+}
+
+.board {
+  position: absolute; inset: 0;
+  background-color: var(--board);
+  background-image:
+    radial-gradient(ellipse at 25% 22%, rgba(255,255,255,.06), transparent 45%),
+    radial-gradient(ellipse at 75% 80%, rgba(255,255,255,.05), transparent 45%),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.05 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  border: 24px solid;
+  border-image: linear-gradient(135deg, var(--wood-b) 0%, var(--wood-a) 45%, #5e3917 55%, var(--wood-b) 100%) 1;
+  box-shadow: inset 0 0 0 4px rgba(0,0,0,.3), inset 0 0 90px rgba(0,0,0,.45);
+}
+.slide--opening .board::after, .slide--ending .board::after {
+  content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: .6;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1080' height='1920' fill='none' stroke='%23f3f5ee' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='52' y='52' width='976' height='1816' rx='30' stroke-dasharray='2 18' opacity='0.55'/%3E%3Cpath d='M900 200 l8 19 19 8 -19 8 -8 19 -8 -19 -19 -8 19 -8 z' fill='%23f3f5ee' stroke='none'/%3E%3Ccircle cx='840' cy='300' r='6' fill='%23f3f5ee' stroke='none'/%3E%3Cpath d='M130 1640 q48 -48 104 -14'/%3E%3Ccircle cx='150' cy='1720' r='6' fill='%23f3f5ee' stroke='none'/%3E%3C/svg%3E") no-repeat center/cover;
+}
+.board-inner { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column; color: var(--chalk); }
+.chalk { font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; color: var(--chalk); text-shadow: 0 1px 0 rgba(255,255,255,.18), 0 0 14px rgba(255,255,255,.10); }
+.chalk-underline { position: relative; }
+.chalk-underline::after {
+  content: ""; position: absolute; left: 50%; transform: translateX(-50%); bottom: -18px; width: 72%; height: 12px;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='12' viewBox='0 0 300 12'%3E%3Cpath d='M4 7 Q80 1 150 6 T296 5' stroke='%23f3f5ee' stroke-width='4' fill='none' stroke-linecap='round' opacity='0.85'/%3E%3C/svg%3E") no-repeat center/100% 100%;
+}
+
+/* Opening / Ending */
+.slide--opening .board-inner, .slide--ending .board-inner { justify-content: center; align-items: center; text-align: center; padding: 60px; }
+.slide--opening .ponte-img-large, .slide--ending .ponte-img-large { width: 380px; height: auto; margin-bottom: 44px; filter: drop-shadow(0 10px 22px rgba(0,0,0,.35)); }
+.slide--opening .channel-name { font-size: 100px; font-weight: 600; margin-bottom: 28px; }
+.slide--opening .tagline { font-size: 46px; opacity: .92; }
+.slide--opening .date-chalk { font-size: 56px; margin-top: 52px; }
+.slide--ending .message { font-size: 92px; font-weight: 600; }
+.slide--ending .sub { font-size: 42px; opacity: .85; margin-top: 26px; }
+
+/* Paper (news / keyword) */
+.slide--news, .slide--keyword {
+  background-color: var(--paper);
+  background-image:
+    repeating-linear-gradient(transparent, transparent 53px, var(--rule) 53px, var(--rule) 55px),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.4 0 0 0 0 0.34 0 0 0 0 0.2 0 0 0 0.04 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23p)'/%3E%3C/svg%3E");
+}
+.slide--news::before, .slide--keyword::before { content: ""; position: absolute; top: 0; bottom: 0; left: 70px; width: 4px; background: var(--margin); opacity: .65; z-index: 0; }
+
+/* News */
+.slide--news .header {
+  position: relative; z-index: 1;
+  background: linear-gradient(100deg, var(--board), color-mix(in srgb, var(--day-accent,#388e3c) 40%, #1c2f24));
+  color: var(--chalk); padding: 30px 40px 30px 84px; display: flex; align-items: center; gap: 18px; flex-shrink: 0;
+  font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; font-size: 34px; font-weight: 600; box-shadow: 0 4px 12px rgba(0,0,0,.18);
+}
+.slide--news .header .news-number { flex-shrink: 0; width: 64px; height: 64px; border-radius: 50%; border: 3px solid var(--chalk); background: rgba(255,255,255,.08); display: flex; align-items: center; justify-content: center; font-size: 36px; font-weight: 600; }
+.slide--news .header .header-right { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+.slide--news .header .news-progress { background: rgba(255,255,255,.16); border: 2px solid rgba(255,255,255,.3); border-radius: 999px; padding: 4px 18px; font-size: 26px; }
+.slide--news .header .source-badge { background: var(--tape); color: #5b4a1e; border-radius: 6px; padding: 5px 16px; font-size: 22px; font-weight: 700; transform: rotate(-2deg); font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; box-shadow: 0 2px 6px rgba(0,0,0,.2); }
+
+.slide--news .og-image-area {
+  margin: 46px 70px 10px 100px; position: relative; background: #fff; padding: 16px 16px 50px; border-radius: 4px;
+  box-shadow: 0 12px 30px rgba(0,0,0,.18); transform: rotate(-1.4deg); flex-shrink: 0;
+}
+.slide--news .og-image-area::after { content: ""; position: absolute; top: -18px; left: 50%; transform: translateX(-50%) rotate(2deg); width: 200px; height: 42px; background: var(--tape); box-shadow: 0 2px 6px rgba(0,0,0,.15); }
+.slide--news .og-img-frame { width: 100%; height: 560px; border-radius: 2px; overflow: hidden; background: #f0ebdd; }
+.slide--news .og-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.slide--news .photo-caption { position: absolute; bottom: 14px; left: 0; right: 0; text-align: center; font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; font-size: 24px; color: #8a7f68; }
+
+.slide--news .content { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 20px 70px 20px 100px; gap: 28px; min-height: 0; }
+.slide--news .title {
+  font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; font-size: 58px; font-weight: 600; color: var(--ink); line-height: 1.7;
+  display: inline; box-decoration-break: clone; -webkit-box-decoration-break: clone;
+  background: linear-gradient(transparent 66%, var(--marker) 66%, var(--marker) 92%, transparent 92%); padding: 0 4px;
+}
+.slide--news .bubble {
+  position: relative; background: #fffdf6; border: 3px dashed color-mix(in srgb, var(--day-accent,#388e3c) 40%, #b8a98a);
+  border-radius: 20px; padding: 30px 38px; font-size: 38px; color: var(--ink); line-height: 1.7; box-shadow: 3px 5px 0 rgba(0,0,0,.06);
+}
+.slide--news .bubble::before { content: "📝"; position: absolute; top: -26px; left: 30px; background: var(--tape); padding: 5px 18px; border-radius: 4px; font-size: 26px; transform: rotate(-3deg); box-shadow: 0 2px 4px rgba(0,0,0,.15); }
+
+.slide--news .ponte-bottom { display: flex; align-items: center; justify-content: center; padding: 10px 0 28px; flex-shrink: 0; }
+.slide--news .ponte-bottom .ponte-img { max-width: 180px; max-height: 200px; filter: drop-shadow(0 8px 16px rgba(0,0,0,.18)); }
+
+.footer { position: absolute; bottom: 0; left: 0; right: 0; height: 64px; display: flex; align-items: center; justify-content: space-between; padding: 0 48px 0 100px; font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; font-size: 26px; color: color-mix(in srgb, var(--day-accent,#388e3c) 70%, #5a4f3a); z-index: 1; }
+
+ruby { ruby-position: over; }
+rt { font-size: 0.42em; font-weight: 400; color: inherit; opacity: .92; }
+
+/* Keyword */
+.slide--keyword .keyword-header { text-align: center; padding: 60px 48px 36px; font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; font-size: 64px; font-weight: 600; color: var(--ink); position: relative; z-index: 1; }
+.slide--keyword .keyword-body { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 0 60px 60px 100px; gap: 32px; position: relative; z-index: 1; }
+.slide--keyword .keyword-card { background: #fffdf6; border-radius: 18px; padding: 30px 36px; display: flex; flex-direction: column; gap: 16px; box-shadow: 3px 5px 0 rgba(0,0,0,.06); border: 2px solid #e8ddc4; }
+.slide--keyword .keyword-term { align-self: flex-start; font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; font-size: 44px; font-weight: 600; color: #fff; background: linear-gradient(135deg, var(--day-grad-start,#2e7d32), var(--day-grad-end,#66bb6a)); border-radius: 12px; padding: 10px 26px; box-shadow: 0 3px 0 rgba(0,0,0,.12); }
+.slide--keyword .keyword-desc { font-size: 38px; color: var(--ink); line-height: 1.55; }
+
+.ponte-placeholder { width: 160px; height: 160px; background: linear-gradient(135deg,#a8edea,#fed6e3); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 80px; }
+</style>
+</head>
+<body>
+
+{% if slide_type == "opening" %}
+<div class="slide slide--opening {{ day_class }}">
+  <div class="board"></div>
+  <div class="board-inner">
+    {% if ponte_image %}<img class="ponte-img-large" src="{{ ponte_image }}" alt="ポンテ">{% endif %}
+    <div class="channel-name chalk chalk-underline">{{ channel_name }}</div>
+    <div class="tagline chalk">{{ tagline }}</div>
+    <div class="date-chalk chalk">{{ date }}</div>
+  </div>
+</div>
+
+{% elif slide_type == "keyword" %}
+<div class="slide slide--keyword {{ day_class }}">
+  <div class="keyword-header">📖 今日のキーワード</div>
+  <div class="keyword-body">
+    {% for kw in keyword_items %}
+    <div class="keyword-card">
+      <div class="keyword-term">{{ kw.term }}</div>
+      <div class="keyword-desc">{{ kw.desc }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="footer"><span>{{ channel_name }}</span><span>{{ date }}</span></div>
+</div>
+
+{% elif slide_type == "ending" %}
+<div class="slide slide--ending {{ day_class }}">
+  <div class="board"></div>
+  <div class="board-inner">
+    {% if ponte_image %}<img class="ponte-img-large" src="{{ ponte_image }}" alt="ポンテ">{% endif %}
+    <div class="message chalk">{{ ending_message }}</div>
+    <div class="sub chalk">チャンネル登録・いいね、よろしくね！</div>
+  </div>
+</div>
+
+{% else %}
+<div class="slide slide--news {{ bg_variant }} {{ day_class }}">
+  <div class="header">
+    {% if news_number %}<div class="news-number">{{ news_number }}</div>{% endif %}
+    <span>今日のAIニュース</span>
+    <div class="header-right">
+      {% if news_total %}<span class="news-progress">{{ news_number }}/{{ news_total }}</span>{% endif %}
+      {% if source_label %}<span class="source-badge">{{ source_label }}</span>{% endif %}
+    </div>
+  </div>
+  {% if og_image %}
+  <div class="og-image-area">
+    <div class="og-img-frame"><img class="og-img" src="{{ og_image }}" alt="記事画像"></div>
+    {% if source_label %}<div class="photo-caption">― {{ source_label }} ―</div>{% endif %}
+  </div>
+  {% endif %}
+  <div class="content">
+    <div><span class="title">{{ title }}</span></div>
+    <div class="bubble">{{ text }}</div>
+  </div>
+  <div class="ponte-bottom">
+    {% if ponte_image %}<img class="ponte-img" src="{{ ponte_image }}" alt="ポンテ">{% else %}<div class="ponte-placeholder" style="width:120px;height:120px;font-size:60px;">🤖</div>{% endif %}
+  </div>
+  <div class="footer"><span>{{ channel_name }}</span><span>{{ date }}</span></div>
+</div>
+{% endif %}
+
+</body>
+</html>
