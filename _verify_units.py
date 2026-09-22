@@ -411,7 +411,7 @@ _base_ctx = dict(
     tagline="むずかしいAIを、かんたんに。", date="2026年8月18日 (火)", ponte_image="",
     index_heading="TODAY'S AI NEWS", index_items=[], keyword_items=[{"term": "AI", "desc": "説明"}],
     bg_variant="bg-1", og_image="data:image/png;base64,x", ending_message="また明日ね！",
-    day_class="day-tue", source_label="itmedia.co.jp", news_total=3,
+    day_class="day-tue", source_label="itmedia.co.jp", news_total=3, text_len=6,
 )
 for _st in ("opening", "keyword", "ending"):
     _html = _tpl.render(slide_type=_st, **_base_ctx)

@@ -147,6 +147,8 @@ _ENDING_TTS_LIMIT = 70
 _KEYWORD_DESC_TTS_LIMIT = 45
 _MAX_KEYWORDS = 3
 _HOOK_TITLE_MAX = 26
+# 読点切り／過長見出しの切り詰め結果として採用する最小文字数（"Anthropic" 単体などを防ぐ）
+_HOOK_TITLE_MIN_USABLE = 12
 # 閉じ括弧まで伸ばすことを許す超過分（固有名詞「Gemini 3.8 Live」等を丸ごと残すため）
 _HOOK_TITLE_SLACK = 8
 # 括弧修復ループの反復上限（暴走防止）
@@ -664,14 +666,17 @@ def _truncate_hook_title(t: str, limit: int) -> str:
         if ch in "？！?!" and 6 <= i <= limit:
             return t[: i + 1]
     for i, ch in enumerate(t):
-        if ch in "。、" and 8 <= i <= limit:
+        # 読点で切る場合も見出しとして成立する長さ（固有名詞1語だけにならない）を要求する
+        if ch in "。、" and _HOOK_TITLE_MIN_USABLE <= i <= limit:
             return t[:i]
     cut = t[:limit]
-    # 英単語の途中で切れた場合は単語境界まで戻す（"GPT-" のような切断を防ぐ）
+    # 英単語の途中で切れた場合は単語境界まで戻す（"GPT-" のような切断を防ぐ）。
+    # ただし戻した結果が短くなりすぎる場合（先頭が短い非ASCII語だけになる等）は
+    # 見出しとして成立する長さを優先し、単語途中の切断を許容する。
     if (re.match(r"[A-Za-z0-9\-\.]", t[limit])
             and re.search(r"[A-Za-z0-9\-\.]$", cut)):
         trimmed = re.sub(r"[A-Za-z0-9\-\.]+$", "", cut)
-        if trimmed:
+        if trimmed and len(trimmed.rstrip("、。・:： ")) >= _HOOK_TITLE_MIN_USABLE:
             cut = trimmed
     # 切断で開いたままの括弧を修復（"…「Local" → "…「Local Models」"）
     plain = cut.rstrip("、。・:： ")
@@ -689,7 +694,10 @@ def normalize_hook_titles(script_data: dict, news_articles: list[dict]) -> dict:
     for sa, na in zip(script_data.get("articles", []), news_articles):
         hook = re.sub(r"\s+", " ", str(sa.get("hook_title") or "")).strip()
         if not hook or len(hook) > _HOOK_TITLE_MAX:
-            fallback = _fallback_hook_title(na.get("title_ja", na.get("title", "")))
+            # 過長なLLM見出しは記事タイトルより情報量が多いので、捨てずに切り詰めを優先する
+            fallback = _fallback_hook_title(hook) if hook else ""
+            if len(fallback) < _HOOK_TITLE_MIN_USABLE:
+                fallback = _fallback_hook_title(na.get("title_ja", na.get("title", "")))
             if hook:
                 logger.info("hook_title too long (%d chars) — using fallback: %s",
                             len(hook), fallback)
