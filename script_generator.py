@@ -193,6 +193,12 @@ def _validate_script_lengths(result: dict) -> list[str]:
     """セリフの読み上げ文字数を検証し、超過項目のフィードバック文を返す."""
     issues = []
     for i, a in enumerate(result.get("articles", []), 1):
+        # 過長な見出しは後段で機械的に切り詰めるしかなく語の途中で切れるため、
+        # 文字数超過はLLMに作り直させる（normalize_hook_titles と同じ数え方）
+        n = len(re.sub(r"\s+", " ", str(a.get("hook_title") or "")).strip())
+        if n > _HOOK_TITLE_MAX:
+            issues.append(f"ニュース{i}のhook_titleが長すぎます（{n}文字）。"
+                          "15〜24文字の、途中で切れない完結した見出しに作り直してください")
         n = _tts_len(a.get("intro", ""))
         if n > _INTRO_TTS_LIMIT:
             issues.append(f"ニュース{i}のintroが長すぎます（読み上げ{n}文字）。50〜70文字に短縮してください")
@@ -658,6 +664,35 @@ def _fallback_hook_title(title_ja: str, limit: int = _HOOK_TITLE_MAX) -> str:
     return out
 
 
+def _cut_at_word_boundary(t: str, limit: int) -> str:
+    """t を limit 文字以内の最後の形態素境界で切る（末尾の助詞・記号は落とす）.
+
+    英数字の連なり（"GPT-5" 等）の内部は境界として扱わない。
+    形態素解析が使えない、または見出しとして短すぎる結果になる場合は空文字を返す。
+    """
+    from ruby_engine import _tokenize_fugashi
+
+    tokens = _tokenize_fugashi(t)
+    if not tokens:
+        return ""
+    ascii_re = re.compile(r"[A-Za-z0-9\-\.]")
+    kept: list[tuple[str, str]] = []
+    best: list[tuple[str, str]] = []
+    pos = 0
+    for surface, _reading, pos1 in tokens:
+        if pos + len(surface) > limit:
+            break
+        pos += len(surface)
+        kept.append((surface, pos1))
+        if not (pos < len(t) and ascii_re.match(t[pos - 1]) and ascii_re.match(t[pos])):
+            best = list(kept)
+    # 「…14項目で」「…AI企業を」のような助詞止め・記号止めは見出しとして据わりが悪い
+    while best and (best[-1][1] in ("助詞", "補助記号") or not best[-1][0].strip()):
+        best.pop()
+    out = "".join(s for s, _ in best).rstrip("、。・:： ")
+    return out if len(out) >= _HOOK_TITLE_MIN_USABLE else ""
+
+
 def _truncate_hook_title(t: str, limit: int) -> str:
     """フック見出しの本体を切り詰める（括弧の整合は呼び出し側で担保）."""
     if len(t) <= limit:
@@ -669,11 +704,13 @@ def _truncate_hook_title(t: str, limit: int) -> str:
         # 読点で切る場合も見出しとして成立する長さ（固有名詞1語だけにならない）を要求する
         if ch in "。、" and _HOOK_TITLE_MIN_USABLE <= i <= limit:
             return t[:i]
-    cut = t[:limit]
+    # 日本語の語の途中で切れないよう、形態素境界で切る（"…で首" "…立ち上" を防ぐ）
+    # 形態素解析が使えない／短くなりすぎる場合は従来の文字数カットに落とす。
+    cut = _cut_at_word_boundary(t, limit) or t[:limit]
     # 英単語の途中で切れた場合は単語境界まで戻す（"GPT-" のような切断を防ぐ）。
     # ただし戻した結果が短くなりすぎる場合（先頭が短い非ASCII語だけになる等）は
     # 見出しとして成立する長さを優先し、単語途中の切断を許容する。
-    if (re.match(r"[A-Za-z0-9\-\.]", t[limit])
+    if (re.match(r"[A-Za-z0-9\-\.]", t[len(cut)])
             and re.search(r"[A-Za-z0-9\-\.]$", cut)):
         trimmed = re.sub(r"[A-Za-z0-9\-\.]+$", "", cut)
         if trimmed and len(trimmed.rstrip("、。・:： ")) >= _HOOK_TITLE_MIN_USABLE:

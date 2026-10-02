@@ -433,6 +433,7 @@ import random as _random
 import threading as _threading
 
 from script_generator import (
+    _HOOK_TITLE_MIN_USABLE,
     _TITLE_BRACKETS,
     _fallback_hook_title,
     _repair_open_bracket,
@@ -473,8 +474,16 @@ for _src in [
 # 7-3. 回帰: 括弧を含まないタイトルは従来どおり（修復はno-op）
 check("hook_title: 括弧なしは短縮のみ",
       _fallback_hook_title("AI企業トップが規制を求める理由と背景") == "AI企業トップが規制を求める理由と背景")
-check("hook_title: 括弧なし長文は26文字で切る",
-      len(_fallback_hook_title("AIプロジェクトの墓場：失敗に終わったAI企業とプロジェクト一覧")) == 26)
+# 語の途中で切らない（形態素境界で切る）ため、ちょうど26文字にはならない
+_got = _fallback_hook_title("AIプロジェクトの墓場：失敗に終わったAI企業とプロジェクト一覧")
+check("hook_title: 括弧なし長文は26文字以内・語境界で切る",
+      _HOOK_TITLE_MIN_USABLE <= len(_got) <= 26 and _got == "AIプロジェクトの墓場：失敗に終わったAI企業", f"got={_got}")
+# 7-3b. 回帰（2026-10-03）: 日本語の語の途中で切れない（"…で首" "…立ち上" が出ていた）
+for _src, _bad in [("Gemini 4 Argonが19項目中14項目で首位を獲得", "首"),
+                   ("【衝撃】HENNGEが取締役2人だけでAI企業立ち上げ", "立ち上")]:
+    _got = _fallback_hook_title(_src)
+    check(f"hook_title: 語の途中で切れない（{_src[:10]}…）",
+          not _got.endswith(_bad) and len(_got) <= 26, f"got={_got}")
 
 # 7-4. 無限ループ回帰（多重括弧混在。過去に while True が振動してハングした）
 for _c, _f, _sl in [
