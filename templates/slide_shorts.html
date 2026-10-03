@@ -137,6 +137,57 @@ body { width: 1080px; height: 1920px; font-family: 'Noto Sans JP', 'Yu Gothic', 
   font-size: 28px; font-weight: 600; color: color-mix(in srgb, var(--day-accent,#1976d2) 72%, #47566a);
 }
 
+/* ============ 字幕焼き込みモード（shorts.burn_captions=true, 2026-10-04） ============
+   セリフ全文は描かず、動画側（video_builder.burn_topic_captions）が音声同期の
+   ルビ付き字幕を「字幕帯」に重ねる。字幕帯の座標は video_builder の
+   _CAPTION_BOX と一致させること（x=236〜1036, 下端 y=1480）。 */
+.slide--cap .body-area { justify-content: flex-start; gap: 30px; padding: 40px 48px 0; }
+.slide--cap .hook {
+  font-size: 76px; font-weight: 800; color: var(--ink); line-height: 1.5; letter-spacing: .01em;
+  display: inline; box-decoration-break: clone; -webkit-box-decoration-break: clone;
+  background: linear-gradient(transparent 66%, var(--marker) 66%, var(--marker) 93%, transparent 93%);
+  padding: 0 6px;
+}
+.slide--cap .hook rt { font-size: 0.34em; }
+.slide--cap .hook, .point-card .pt, .slide--cap .topic-title, .slide--cap .src-title { word-break: auto-phrase; }
+/* 見出しの下に元記事タイトルを小さく添える（文脈補足＋見出しと字幕帯の間の余白を埋める） */
+.slide--cap .src-title {
+  display: flex; gap: 16px; align-items: flex-start;
+  font-size: 34px; font-weight: 500; line-height: 1.6; color: #5a6878;
+}
+.slide--cap .src-title .src-label {
+  flex-shrink: 0; margin-top: 6px; font-size: 24px; font-weight: 700; letter-spacing: .06em;
+  color: var(--accent); border: 2px solid var(--accent); border-radius: 10px; padding: 2px 12px;
+}
+.slide--cap .src-title .src-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.slide--cap .src-title rt { font-size: 0.42em; }
+
+/* 要点カード（図解） */
+.points { display: flex; flex-direction: column; gap: 20px; }
+.point-card {
+  display: flex; align-items: center; gap: 26px;
+  background: var(--card); border-radius: 24px; padding: 24px 30px;
+  box-shadow: 0 8px 24px rgba(29,39,51,.10);
+  border: 3px solid color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.point-card .num {
+  width: 72px; height: 72px; flex-shrink: 0; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--day-grad-start,#1565c0), var(--day-grad-end,#42a5f5));
+  color: #fff; font-size: 40px; font-weight: 800;
+}
+.point-card .pt { font-size: 46px; font-weight: 700; color: var(--ink); line-height: 1.45; }
+.point-card .pt rt { font-size: 0.36em; }
+.slide--cap.slide--point .hero-small { margin: 0; }
+.slide--cap.slide--point .hero-small .hero-img { height: 520px; }
+
+/* 字幕帯の左に立つポンテ（字幕カードはここへ動画側で重なる） */
+.cap-ponte {
+  position: absolute; left: 36px; bottom: 440px; width: 186px; height: auto; z-index: 3;
+  filter: drop-shadow(0 10px 20px rgba(29,39,51,.22));
+}
+.slide--cap .brandline { bottom: 372px; }
+
 /* ルビ: 読みが親文字より長いときに親文字が字間伸長される（独 占）のを防ぐため
    center 揃え＋ルビ単位の途中改行を禁止する */
 ruby { ruby-position: over; ruby-align: center; white-space: nowrap; }
@@ -194,6 +245,85 @@ rt { font-size: 0.40em; font-weight: 400; color: inherit; opacity: .92; letter-s
   <div class="message">{{ ending_message }}</div>
   <div class="sub">チャンネル登録・いいね、よろしくね！</div>
 </div>
+
+{% elif captions_burned %}
+{# ---- 字幕焼き込みモード: 大見出し＋図解。セリフは動画側の同期字幕で見せる ---- #}
+{% set is_point = "のポイント" in title %}
+<div class="slide slide--news slide--cap {% if is_point %}slide--point{% endif %} {{ day_class }}">
+  <div class="topbar">
+    <div class="live-dot"></div>
+    <span class="topbar-title">今日のAIニュース</span>
+    <span class="topbar-date">{{ date }}</span>
+  </div>
+  {% if og_image and not is_point %}
+  <div class="hero">
+    <img class="hero-img" src="{{ og_image }}" alt="記事画像">
+    {% if source_label %}<span class="source-chip">{{ source_label }}</span>{% endif %}
+  </div>
+  {% endif %}
+  <div class="body-area">
+    {% if is_point %}
+    <div class="topic-strip">
+      {% if og_image %}<img class="topic-thumb" src="{{ og_image }}" alt="記事画像">{% endif %}
+      <div class="topic-text">
+        <div class="topic-kicker">{% if source_label %}{{ source_label }}{% else %}TOPIC{% endif %}</div>
+        <div class="topic-title">{% if hook_title %}{{ hook_title }}{% else %}{{ title | replace("のポイント", "") }}{% endif %}</div>
+      </div>
+    </div>
+    <div class="point-badge">💡 ここがポイント</div>
+    {% if points %}
+    <div class="points">
+      {% for pt in points %}
+      <div class="point-card"><span class="num">{{ loop.index }}</span><span class="pt">{{ pt }}</span></div>
+      {% endfor %}
+    </div>
+    {% elif og_image %}
+    <div class="hero hero-small"><img class="hero-img" src="{{ og_image }}" alt="記事画像"></div>
+    {% endif %}
+    {% else %}
+    {% if hook_title %}
+    <div><span class="hook">{{ hook_title }}</span></div>
+    <div class="src-title"><span class="src-label">元記事</span><span class="src-text">{{ title }}</span></div>
+    {% else %}
+    <div><span class="headline">{{ title }}</span></div>
+    {% endif %}
+    {% endif %}
+  </div>
+  {% if ponte_image %}<img class="cap-ponte" src="{{ ponte_image }}" alt="ポンテ">{% endif %}
+  <div class="brandline">{{ channel_name }}</div>
+</div>
+<script>
+/* 字幕帯（動画側 video_builder._CAPTION_BOX は bottom=1480, height=320
+   → 上端 y=1160 から 1480 に重なる）へ本文がかからないようにする:
+   見出しが長く3行以上になったら縮め、それでも入らなければ元記事タイトルを隠す。
+   LIMIT は必ず 1480 - 320 = 1160（_CAPTION_BOX の上端）に合わせること。 */
+(function () {
+  var LIMIT = 1160;
+  function bottomOf(sel) { var el = document.querySelector(sel); return el ? el.getBoundingClientRect().bottom : 0; }
+  var hook = document.querySelector('.slide--cap .hook');
+  var fs = 76;
+  while (hook && bottomOf('.slide--cap .hook') > LIMIT - 60 && fs > 56) { fs -= 4; hook.style.fontSize = fs + 'px'; }
+  var src = document.querySelector('.slide--cap .src-title');
+  if (src && src.getBoundingClientRect().bottom > LIMIT) { src.style.display = 'none'; }
+  // 要点カード（3枚）は要点の文字数次第で字幕帯にかかることがあるため縮める
+  var points = document.querySelector('.slide--cap .points');
+  if (points) {
+    var cards = points.querySelectorAll('.point-card');
+    var nums = points.querySelectorAll('.num');
+    var pts = points.querySelectorAll('.pt');
+    var gap = 20, pad = 24, numSize = 72, numFs = 40, ptFs = 46;
+    while (points.getBoundingClientRect().bottom > LIMIT && gap > 8) {
+      gap -= 2; pad -= 3; numSize -= 6; numFs -= 3; ptFs -= 3;
+      points.style.gap = gap + 'px';
+      for (var i = 0; i < cards.length; i++) { cards[i].style.padding = pad + 'px ' + (pad + 6) + 'px'; }
+      for (var j = 0; j < nums.length; j++) {
+        nums[j].style.width = numSize + 'px'; nums[j].style.height = numSize + 'px'; nums[j].style.fontSize = numFs + 'px';
+      }
+      for (var k = 0; k < pts.length; k++) { pts[k].style.fontSize = ptFs + 'px'; }
+    }
+  }
+})();
+</script>
 
 {% else %}
 {% set is_point = "のポイント" in title %}

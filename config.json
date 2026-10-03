@@ -70,7 +70,8 @@
   "shorts": {
     "per_topic": true,
     "topics_per_day": 3,
-    "max_topic_duration_sec": 75
+    "max_topic_duration_sec": 75,
+    "burn_captions": true
   },
   "video": {
     "resolution": [1920, 1080],

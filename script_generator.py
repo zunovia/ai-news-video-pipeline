@@ -70,6 +70,7 @@ AI初心者の大人向けYouTubeチャンネル「ポンテのAI教室」で{to
 - intro: 50〜70文字
 - explanation: 90〜120文字
 - insight: 30〜55文字
+- points: 3個（各8〜18文字）
 - ending: 40〜60文字
 - 長すぎるセリフは自動で末尾の文が削られてしまうので、必ず範囲内に収めること
 
@@ -103,6 +104,13 @@ AI初心者の大人向けYouTubeチャンネル「ポンテのAI教室」で{to
   締めてよい（例: 「あなたの仕事なら、まず何を任せてみたい？」）。
   ただし「みんなはどう思う？」のような中身のない汎用の問いは禁止
 
+要点(points)のルール（画面に箇条書きで表示する図解カード。読み上げはしない）:
+- そのニュースの要点をちょうど3個、各8〜18文字の体言止め・短文で書く
+- 必ず「要約」「使える事実」に書かれている事実だけを使う。推測・誇張・意見は禁止
+- 数字・固有名詞があれば優先して入れる（例: 「19項目中14項目で首位」「60言語に対応」）
+- 制限・注意点（「一般提供は未定」「一部の組織のみ」など）が要約にあれば1個はそれにする
+- 英語にカタカナ読みは付けない。カギ括弧・句点は使わない
+
 禁止フレーズ（これらや似た定型文を絶対に使わない）:
 - 「知れば知るほどおもしろくなるよね」「ポンテ、思わず目が丸くなっちゃったよ」
 - 「こういうニュースを知ってると、ちょっとかっこいいよね」「これからどうなるか楽しみだね」
@@ -124,6 +132,7 @@ hook_title: 「【衝撃】FaceIDの生みの親が脳のAI診断に参入」
 intro: 「iPhone(アイフォン)の顔認証を作った本人が、今度は脳の病気をAIで見つける会社を立ち上げたんだ！顔の次は脳って、話が大きすぎない？」
 explanation: 「FaceID(フェイスアイディー)を生んだ技術者の新会社は、血液検査みたいに手軽な脳の健康チェックをAIで実現しようとしているんだ。脳ドックは今は高くて大がかりだけど、それがぐっと身近になるかもしれないよ！」
 insight: 「ポンテはこう思うな。健康診断の項目に、脳のAIチェックが入る日は意外と近いかも！」
+points: ["FaceIDの開発者が新会社を設立", "脳の健康をAIで手軽にチェック", "高価な脳ドックの代わりを目指す"]
 
 JSON形式のみで回答（説明文不要）。
 """
@@ -143,12 +152,20 @@ SCRIPT_SYSTEM_PROMPT = SCRIPT_SYSTEM_PROMPT_TEMPLATE.format(topic="AI")
 _INTRO_TTS_LIMIT = 80
 _EXPLANATION_TTS_LIMIT = 125
 _INSIGHT_TTS_LIMIT = 60
+# 切り詰め後の考察がこれ未満なら中身のない前置きだけとみなして捨てる
+_INSIGHT_MIN_USABLE = 15
 _ENDING_TTS_LIMIT = 70
 _KEYWORD_DESC_TTS_LIMIT = 45
 _MAX_KEYWORDS = 3
 _HOOK_TITLE_MAX = 26
+# 図解カードの要点（points）の上限。超過時はリトライ→それでも長い要点は捨てる
+# （途中で切ると意味が壊れるため切り詰めない）
+_POINT_MAX = 20
+_POINTS_COUNT = 3
 # 読点切り／過長見出しの切り詰め結果として採用する最小文字数（"Anthropic" 単体などを防ぐ）
 _HOOK_TITLE_MIN_USABLE = 12
+# これ未満の見出しは「製品名だけ」になりがちなのでLLMに作り直させる（切り詰めはしない）
+_HOOK_TITLE_MIN_RETRY = 15
 # 閉じ括弧まで伸ばすことを許す超過分（固有名詞「Gemini 3.8 Live」等を丸ごと残すため）
 _HOOK_TITLE_SLACK = 8
 # 括弧修復ループの反復上限（暴走防止）
@@ -189,6 +206,25 @@ def _trim_serif_to_limit(text: str, limit: int) -> str:
     return out
 
 
+def _clean_point(p) -> str:
+    """要点1個を表示用に整える（空白正規化・LLMが付けた読み/句点/括弧を除去）."""
+    t = re.sub(r"\s+", " ", str(p or "")).strip()
+    t = re.sub(r"[(（][ぁ-んァ-ヶー]+[)）]", "", t)  # ルビ記法は表示時に付け直す
+    return t.strip("「」『』。・-－ ")
+
+
+def normalize_points(points) -> list[str]:
+    """要点リストを検証・整形する。過長な要点は切らずに捨て、最大3個に揃える."""
+    if not isinstance(points, list):
+        return []
+    out: list[str] = []
+    for p in points:
+        t = _clean_point(p)
+        if t and len(t) <= _POINT_MAX and t not in out:
+            out.append(t)
+    return out[:_POINTS_COUNT]
+
+
 def _validate_script_lengths(result: dict) -> list[str]:
     """セリフの読み上げ文字数を検証し、超過項目のフィードバック文を返す."""
     issues = []
@@ -199,6 +235,10 @@ def _validate_script_lengths(result: dict) -> list[str]:
         if n > _HOOK_TITLE_MAX:
             issues.append(f"ニュース{i}のhook_titleが長すぎます（{n}文字）。"
                           "15〜24文字の、途中で切れない完結した見出しに作り直してください")
+        elif 0 < n < _HOOK_TITLE_MIN_RETRY:
+            # 「Gemini 4 Argon」のような製品名だけの見出しはフックにならない
+            issues.append(f"ニュース{i}のhook_titleが短すぎます（{n}文字）。"
+                          "製品名だけでなく「何がどうなった」まで言い切る15〜24文字の見出しにしてください")
         n = _tts_len(a.get("intro", ""))
         if n > _INTRO_TTS_LIMIT:
             issues.append(f"ニュース{i}のintroが長すぎます（読み上げ{n}文字）。50〜70文字に短縮してください")
@@ -208,6 +248,13 @@ def _validate_script_lengths(result: dict) -> list[str]:
         n = _tts_len(a.get("insight", ""))
         if n > _INSIGHT_TTS_LIMIT:
             issues.append(f"ニュース{i}のinsightが長すぎます（読み上げ{n}文字）。30〜55文字に短縮してください")
+        pts = a.get("points")
+        if not isinstance(pts, list) or len(pts) < _POINTS_COUNT:
+            issues.append(f"ニュース{i}のpointsがありません。要約の事実から8〜18文字の要点を3個作ってください")
+        else:
+            for p in pts:
+                if len(_clean_point(p)) > _POINT_MAX:
+                    issues.append(f"ニュース{i}のpoints「{p}」が長すぎます。8〜18文字に短縮してください")
     n = _tts_len(result.get("ending", ""))
     if n > _ENDING_TTS_LIMIT:
         issues.append(f"endingが長すぎます（読み上げ{n}文字）。40〜60文字に短縮してください")
@@ -217,10 +264,14 @@ def _validate_script_lengths(result: dict) -> list[str]:
 def _cap_script_lengths(result: dict) -> dict:
     """リトライ後も超過しているセリフを文単位トリムで強制的に上限内へ収める."""
     for a in result.get("articles", []):
+        a["points"] = normalize_points(a.get("points"))
         a["intro"] = _trim_serif_to_limit(a.get("intro", ""), _INTRO_TTS_LIMIT)
         a["explanation"] = _trim_serif_to_limit(a.get("explanation", ""), _EXPLANATION_TTS_LIMIT)
         if a.get("insight"):
             a["insight"] = _trim_serif_to_limit(a["insight"], _INSIGHT_TTS_LIMIT)
+            # 切り詰めで「ポンテはこう思うな。」のような前置きだけが残ったら考察ごと捨てる
+            if _tts_len(a["insight"]) < _INSIGHT_MIN_USABLE:
+                a["insight"] = ""
     if result.get("ending"):
         result["ending"] = _trim_serif_to_limit(result["ending"], _ENDING_TTS_LIMIT)
     keywords = result.get("keywords", [])[:_MAX_KEYWORDS]
@@ -277,7 +328,8 @@ def generate_article_scripts(
         ' "hook_title": "動画タイトルになるフック見出し（15〜24文字。固有名詞・数字入りで言い切る）",'
         ' "intro": "紹介セリフ（50〜70文字。挨拶禁止・1文目で一番驚く事実を言い切る）",'
         ' "explanation": "解説セリフ（90〜120文字）",'
-        ' "insight": "ポンテの考察（30〜55文字。独自の意見・ツッコミ・予想）"}\n'
+        ' "insight": "ポンテの考察（30〜55文字。独自の意見・ツッコミ・予想）",'
+        ' "points": ["要点1（8〜18文字・事実のみ）", "要点2", "要点3"]}\n'
         '  ],\n'
         '  "ending": "エンディングセリフ（40〜60文字）",\n'
         '  "keywords": [\n'
@@ -288,6 +340,7 @@ def generate_article_scripts(
 
     last_error: Exception | None = None
     best_result: dict | None = None
+    best_issue_count = 10**9
     feedback = ""
     for attempt in range(max_retries + 1):
         text = ""
@@ -308,10 +361,13 @@ def generate_article_scripts(
                 raise ValueError("Response JSON has no articles")
 
             # 読み上げ文字数の検証（3分尺の担保）。超過時はフィードバック付きリトライ
-            best_result = result
             issues = _validate_script_lengths(result)
             if not issues:
                 return _cap_script_lengths(result)
+            # 全試行が超過した場合に備え、問題の最も少ない試行を残す
+            # （以前は最後の試行を採用しており、悪化した出力を切り詰めて使うことがあった）
+            if len(issues) <= best_issue_count:
+                best_result, best_issue_count = result, len(issues)
             logger.info("Script length issues (attempt %d): %s",
                         attempt + 1, " / ".join(issues))
             feedback = (
@@ -890,6 +946,8 @@ def generate_script(
             {
                 "hook_title": a.get("hook_title", ""),
                 "label": a.get("label", ""),
+                # 図解カード用の要点（スライドに箇条書き表示。読み上げはしない）
+                "points": normalize_points(a.get("points")),
             }
             for a in script_data.get("articles", [])
         ],

@@ -412,6 +412,7 @@ _base_ctx = dict(
     index_heading="TODAY'S AI NEWS", index_items=[], keyword_items=[{"term": "AI", "desc": "説明"}],
     bg_variant="bg-1", og_image="data:image/png;base64,x", ending_message="また明日ね！",
     day_class="day-tue", source_label="itmedia.co.jp", news_total=3, text_len=6,
+    hook_title="", points=[], captions_burned=False,
 )
 for _st in ("opening", "keyword", "ending"):
     _html = _tpl.render(slide_type=_st, **_base_ctx)
@@ -424,6 +425,69 @@ _pt_html = _tpl.render(slide_type="news", **_pt_ctx)
 check("Shortsテンプレ: ポイントnews=バッジ＋heroなし（ルビHTML越しに判定）",
       'class="point-badge"' in _pt_html and 'class="hero"' not in _pt_html and "slide--point" in _pt_html)
 check("Shortsテンプレ: ポイントのトピック行から「のポイント」除去", "のポイント" not in _pt_html)
+
+# --- 13b. 字幕焼き込みモード（2026-10-04 刷新: 大見出し＋要点カード＋同期字幕） ----------
+_cap_ctx = dict(_base_ctx, captions_burned=True, hook_title="【速報】新AIが首位", points=["要点A", "要点B", "要点C"])
+_cap_news = _tpl.render(slide_type="news", **_cap_ctx)
+check("字幕モード: 紹介=hook見出し＋元記事タイトル＋hero",
+      'class="hook"' in _cap_news and "【速報】新AIが首位" in _cap_news and 'class="src-title"' in _cap_news
+      and 'class="hero"' in _cap_news)
+check("字幕モード: セリフ全文を描かない（動画側で焼き込む）",
+      "セリフだよ！" not in _cap_news and 'class="serif-card' not in _cap_news)
+_cap_pt = _tpl.render(slide_type="news", **dict(_cap_ctx, title="テストのポイント"))
+check("字幕モード: ポイント=要点カード3枚＋トピック帯にhook",
+      _cap_pt.count('class="point-card"') == 3 and "【速報】新AIが首位" in _cap_pt and 'class="point-badge"' in _cap_pt)
+_cap_pt0 = _tpl.render(slide_type="news", **dict(_cap_ctx, title="テストのポイント", points=[]))
+check("字幕モード: 要点なし→記事画像で代替（カード0枚・崩れなし）",
+      'class="point-card"' not in _cap_pt0 and "hero-small" in _cap_pt0)
+_cap_nohook = _tpl.render(slide_type="news", **dict(_cap_ctx, hook_title=""))
+check("字幕モード: hookなし→従来の記事タイトル見出し", 'class="headline"' in _cap_nohook)
+
+from video_builder import _split_long_sentence, _raw_sentence_cues, _CAPTION_BOX
+
+# LIMIT は必ず _CAPTION_BOX の上端（bottom - height）と一致させること。
+# ズレると見出し/元記事タイトルが動画側で焼き込まれる字幕カードと重なる
+# （2026-10-04 QA2回目で発覚: LIMIT=1170固定値がbox上端1080と100px乖離していた）。
+_cap_box_top = _CAPTION_BOX["bottom"] - _CAPTION_BOX["height"]
+check("字幕モード: 字幕帯への重なり防止スクリプトのLIMITが_CAPTION_BOX上端と一致",
+      f"var LIMIT = {_cap_box_top}" in _cap_news and "src.style.display = 'none'" in _cap_news,
+      f"expected LIMIT={_cap_box_top}")
+# 要点カード（最大20文字×3）も字幕帯にかかりうる（2026-10-04 QA2回目で実測確認:
+# 20文字×3＋記事画像ありの実寸でbottom=1102>1080となり重なっていた）ため縮小ロジックが必要
+check("字幕モード: 要点カードの縮小ロジックを含む（字幕帯への重なり対策）",
+      "points.getBoundingClientRect().bottom > LIMIT" in _cap_pt)
+_long = "CaddyやFambotみたいなサービスは、あなたがメッセージで「明日(あす)の予定(よてい)を教(おし)えて、すぐに」と指示(しじ)するだけで、勝手(かって)にカレンダーを見て対応(たいおう)してくれるんだ。"
+_parts = _split_long_sentence(_long)
+check("字幕分割: 長文を読点で分割", len(_parts) >= 2, str(_parts))
+check("字幕分割: 連結で元に戻る（文字欠けなし）", "".join(_parts) == _long)
+check("字幕分割: 括弧の内側の読点では切らない",
+      all(pp.count("「") == pp.count("」") for pp in _parts), str(_parts))
+check("字幕分割: ルビ括弧を壊さない", all(pp.count("(") == pp.count(")") for pp in _parts), str(_parts))
+check("字幕分割: 短文はそのまま", _split_long_sentence("短い文だよ。") == ["短い文だよ。"])
+_rc = _raw_sentence_cues("一文目(いちぶんめ)だよ！" + _long, 2.0, 20.0)
+check("字幕キュー(生): ルビ記法を保持", "(いちぶんめ)" in _rc[0][2], str(_rc[0]))
+check("字幕キュー(生): 開始と終了", abs(_rc[0][0] - 2.0) < 1e-6 and abs(_rc[-1][1] - 22.0) < 0.01)
+check("字幕キュー(生): 単調増加・重なりなし",
+      all(_rc[k][1] <= _rc[k + 1][0] + 1e-6 for k in range(len(_rc) - 1)))
+check("字幕キュー(生): 空", _raw_sentence_cues("", 0, 5) == [])
+_tplsrc = Path("templates/slide_shorts.html").read_text(encoding="utf-8")
+check("字幕帯: テンプレのポンテ下端=動画側の字幕帯下端（1920-440=1480）",
+      "bottom: 440px" in _tplsrc and _CAPTION_BOX["bottom"] == 1480)
+
+from script_generator import normalize_points, _validate_script_lengths, _cap_script_lengths
+check("要点: 過長は切らずに捨てる", normalize_points(["短い要点", "あ" * 25, "二つ目の要点"]) == ["短い要点", "二つ目の要点"])
+check("要点: 最大3個・重複除去", normalize_points(["A1", "A1", "B2", "C3", "D4"]) == ["A1", "B2", "C3"])
+check("要点: ルビ記法と句点を除去", normalize_points(["Siri(シリ)が対応。"]) == ["Siriが対応"])
+check("要点: リスト以外は空", normalize_points(None) == [] and normalize_points("x") == [])
+_ok_art = {"hook_title": "新AIが19項目中14項目で首位に", "intro": "あ" * 50, "explanation": "い" * 90,
+           "insight": "う" * 30, "points": ["要点その一", "要点その二", "要点その三"]}
+check("検証: 正常な記事は問題なし", _validate_script_lengths({"articles": [_ok_art]}) == [])
+check("検証: 製品名だけの短いhookはリトライ対象",
+      any("短すぎ" in x for x in _validate_script_lengths({"articles": [dict(_ok_art, hook_title="Gemini 4 Argon")]})))
+check("検証: points欠落はリトライ対象",
+      any("points" in x for x in _validate_script_lengths({"articles": [dict(_ok_art, points=[])]})))
+_capd = _cap_script_lengths({"articles": [dict(_ok_art, insight="ポンテはこう思うな。" + "え" * 70 + "。")]})
+check("切り詰め: 前置きだけ残る考察は捨てる", _capd["articles"][0]["insight"] == "", repr(_capd["articles"][0]["insight"]))
 
 tmp.unlink(missing_ok=True)
 

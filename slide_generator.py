@@ -282,8 +282,16 @@ def render_slide_html(
     og_image: str = "",
     source_label: str = "",
     news_total: int = 0,
+    hook_title: str = "",
+    points: list[str] | None = None,
+    captions_burned: bool = False,
 ) -> str:
-    """Render a single slide to HTML."""
+    """Render a single slide to HTML.
+
+    hook_title / points は script_meta 由来（Shortsの大見出し・図解カード）。
+    captions_burned=True のときセリフは動画側で音声同期字幕として焼き込むため、
+    テンプレートはセリフ全文を描かず字幕用の空き帯を確保する。
+    """
     env = jinja2.Environment(
         loader=jinja2.FileSystemLoader(str(template_path.parent)),
         autoescape=False,
@@ -320,6 +328,10 @@ def render_slide_html(
     # ルビ・記号を除いた表示文字数（テンプレート側の長文フォント縮小判定に使う）
     text_len = len(_RUBY_RE.sub(lambda m: m.group(1) or m.group(3) or "", serif_text))
 
+    # Shorts: フック見出し・要点カード（ルビは形態素解析で自動付与。セリフ由来の手修正ルビを優先）
+    hook_title_html = apply_ruby(add_ruby_to_text(_apply_ruby_dict(hook_title, ruby_dict))) if hook_title else ""
+    points_html = [apply_ruby(add_ruby_to_text(_apply_ruby_dict(pt, ruby_dict))) for pt in (points or [])]
+
     # Apply ruby to keyword items
     rendered_keywords = []
     if keyword_items:
@@ -355,6 +367,9 @@ def render_slide_html(
         source_label=source_label,
         news_total=news_total,
         text_len=text_len,
+        hook_title=hook_title_html,
+        points=points_html,
+        captions_burned=captions_burned,
     )
 
 
@@ -469,6 +484,21 @@ async def generate_slides_async(
                     mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "webp": "webp"}.get(suffix, "jpeg")
                     og_images[idx] = f"data:image/{mime};base64,{img_data}"
 
+    # script_meta: フック見出し・要点（1始まりの記事番号キー。news JSON と同じ並び）
+    hook_titles: dict[int, str] = {}
+    article_points: dict[int, list[str]] = {}
+    meta_path = state_dir / f"script_meta_{date_key}.json"
+    if meta_path.exists():
+        import json as _json
+        try:
+            meta = _json.loads(meta_path.read_text(encoding="utf-8"))
+            for idx, a in enumerate(meta.get("articles", []), 1):
+                hook_titles[idx] = a.get("hook_title", "") or ""
+                article_points[idx] = [p for p in (a.get("points") or []) if p]
+        except (ValueError, OSError) as e:
+            logger.warning("script_meta unreadable (%s) — slides fall back to article titles", e)
+    captions_burned = bool(shorts and config.get("shorts", {}).get("burn_captions", False))
+
     # インデックススライド用: ニュースタイトル一覧を事前抽出（セリフのルビを優先）
     from script_generator import add_ruby_to_text
     news_titles = []
@@ -531,6 +561,9 @@ async def generate_slides_async(
                 og_image=og_image,
                 source_label=source_label,
                 news_total=0 if per_topic else news_total,
+                hook_title=hook_titles.get(article_index, "") if (shorts and slide_type == "news") else "",
+                points=article_points.get(article_index) if (shorts and slide_type == "news") else None,
+                captions_burned=captions_burned,
             )
 
             await page.set_content(html, wait_until="networkidle")

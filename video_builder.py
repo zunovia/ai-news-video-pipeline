@@ -419,40 +419,95 @@ def _sentence_cues(text: str, start: float, duration: float) -> list[tuple[float
     return cues
 
 
-def generate_topic_captions(
-    date_str: str,
-    config_path: Path = Path("config.json"),
-) -> list[Path]:
-    """「1ニュース=1本」Shorts各動画のSRT字幕を生成する.
+# 字幕1キューの最大表示文字数（ルビ除く）。超える文は読点で分割する
+# （焼き込み字幕カードが3行=約45文字に収まるように）
+_CAPTION_CHUNK_MAX = 40
+_OPEN_BRACKETS = "「『(（【"
+_CLOSE_BRACKETS = "」』)）】"
+
+
+def _split_long_sentence(raw: str, limit: int = _CAPTION_CHUNK_MAX) -> list[str]:
+    """長い1文を括弧の外の読点「、」で分割し、各片を表示 limit 文字以内に近づける.
+
+    ルビ記法付きの生セリフのまま扱い、長さは字幕表示文字数（ルビ除去後）で測る。
+    括弧の内側では分割しない（引用やルビ括弧を壊さない）。分割点が無ければそのまま返す。
+    """
+    if len(serif_to_caption_text(raw)) <= limit:
+        return [raw]
+    # 括弧の外にある「、」の直後を分割候補にする
+    cuts: list[int] = []
+    depth = 0
+    for idx, ch in enumerate(raw):
+        if ch in _OPEN_BRACKETS:
+            depth += 1
+        elif ch in _CLOSE_BRACKETS:
+            depth = max(depth - 1, 0)
+        elif ch == "、" and depth == 0:
+            cuts.append(idx + 1)
+    if not cuts:
+        return [raw]
+    pieces: list[str] = []
+    start = 0
+    last_ok = None
+    for c in cuts + [len(raw)]:
+        if len(serif_to_caption_text(raw[start:c])) <= limit:
+            last_ok = c
+            continue
+        if last_ok is not None and last_ok > start:
+            pieces.append(raw[start:last_ok])
+            start = last_ok
+            last_ok = c if len(serif_to_caption_text(raw[start:c])) <= limit else None
+        if last_ok is None:
+            # 1区間だけで limit 超え → その区間はそのまま1片にする
+            pieces.append(raw[start:c])
+            start = c
+    if start < len(raw):
+        pieces.append(raw[start:])
+    return [p for p in pieces if p.strip()]
+
+
+def _raw_sentence_cues(serif: str, start: float, duration: float) -> list[tuple[float, float, str]]:
+    """生セリフ（ルビ記法付き）を文→長文は読点で分割し、文字数比例でキュー化する.
+
+    返すテキストはルビ記法付きの生テキスト（焼き込み字幕でルビ表示に使う）。
+    SRT には serif_to_caption_text() で変換して書く。
+    """
+    serif = _DIRECTION_RE.sub("", serif or "").strip()
+    sentences = [s.strip() for s in _CAPTION_SENTENCE_RE.split(serif) if s.strip()]
+    chunks = [c.strip() for s in sentences for c in _split_long_sentence(s) if c.strip()]
+    weights = [max(len(serif_to_caption_text(c)), 1) for c in chunks]
+    total = sum(weights)
+    if not chunks:
+        return []
+    cues = []
+    cursor = start
+    for c, w in zip(chunks, weights):
+        d = duration * w / total
+        cues.append((cursor, min(cursor + d, start + duration), c))
+        cursor += d
+    return cues
+
+
+def compute_topic_cues(date_str: str, config: dict) -> list[tuple[list[tuple[float, float, str]], float]]:
+    """各トピック動画の字幕キュー（開始, 終了, ルビ付き生テキスト）と計算上の総尺を返す.
 
     タイミングはTTS音声（output/audio/slide_NN.mp3）の実尺と、エンジンの
     シーン構成（padding_before + 音声 + padding_after、シーン間はクロス
-    フェードで transition_duration 秒重なる）から計算する。
-    出力: state/captions/{date}_topic{i}.srt
-
-    動画ビルド後に呼ぶこと（音声ファイルが必要）。失敗しても動画は無事なので
-    呼び出し側は非致命として扱ってよい。
+    フェードで transition_duration 秒重なる）から計算する。動画ビルド後に呼ぶこと。
     """
-    config = load_config(config_path)
     state_dir = Path(config["paths"]["state_dir"])
-    output_dir = Path(config["paths"]["output_dir"])
-    audio_dir = output_dir / "audio"
-    captions_dir = state_dir / "captions"
-    captions_dir.mkdir(parents=True, exist_ok=True)
-
-    script_path = state_dir / f"script_{date_str}.md"
+    audio_dir = Path(config["paths"]["output_dir"]) / "audio"
     import slide_generator as sg
-    raw_slides = sg.parse_slides(script_path)
-    top_n = config.get("shorts", {}).get("topics_per_day", 3)
-    units = select_topic_units(raw_slides, top_n)
+    raw_slides = sg.parse_slides(state_dir / f"script_{date_str}.md")
+    units = select_topic_units(raw_slides, config.get("shorts", {}).get("topics_per_day", 3))
 
     video_cfg = config.get("video", {})
     pb = video_cfg.get("padding_before", 0.3)
     pa = video_cfg.get("padding_after", 0.3)
     trans = video_cfg.get("transition_duration", 0.5)
 
-    out_paths: list[Path] = []
-    for i, unit in enumerate(units, 1):
+    timelines = []
+    for unit in units:
         cues: list[tuple[float, float, str]] = []
         t = 0.0  # タイムライン上の現シーン開始位置
         for s in unit:
@@ -460,11 +515,31 @@ def generate_topic_captions(
             if not audio_path.exists():
                 raise FileNotFoundError(f"Audio not found for caption timing: {audio_path}")
             audio_dur = _ffprobe_duration(audio_path)
-            text = serif_to_caption_text(s.get("serif", ""))
-            cues.extend(_sentence_cues(text, t + pb, audio_dur))
+            cues.extend(_raw_sentence_cues(s.get("serif", ""), t + pb, audio_dur))
             # 次のシーンはクロスフェードで trans 秒早く（重なって）始まる
             t += pb + audio_dur + pa - trans
+        timelines.append((cues, t + trans))  # 最後のシーンは重なりを引かない
+    return timelines
 
+
+def generate_topic_captions(
+    date_str: str,
+    config_path: Path = Path("config.json"),
+) -> list[Path]:
+    """「1ニュース=1本」Shorts各動画のSRT字幕を生成する.
+
+    出力: state/captions/{date}_topic{i}.srt（タイミングは compute_topic_cues）
+    動画ビルド後に呼ぶこと（音声ファイルが必要）。失敗しても動画は無事なので
+    呼び出し側は非致命として扱ってよい。
+    """
+    config = load_config(config_path)
+    state_dir = Path(config["paths"]["state_dir"])
+    output_dir = Path(config["paths"]["output_dir"])
+    captions_dir = state_dir / "captions"
+    captions_dir.mkdir(parents=True, exist_ok=True)
+    out_paths: list[Path] = []
+    for i, (raw_cues, expected) in enumerate(compute_topic_cues(date_str, config), 1):
+        cues = [(a, b, serif_to_caption_text(txt)) for a, b, txt in raw_cues]
         srt_lines = []
         for idx, (a, b, txt) in enumerate(cues, 1):
             srt_lines.append(f"{idx}\n{_format_srt_time(a)} --> {_format_srt_time(b)}\n{txt}\n")
@@ -474,7 +549,6 @@ def generate_topic_captions(
         # 検証: 計算上の総尺と実動画の尺のズレを警告（0.8秒超で通知）
         video_path = output_dir / f"{date_str}_shorts_topic{i}.mp4"
         if video_path.exists() and cues:
-            expected = t + trans  # 最後のシーンは重なりを引かない
             actual = _ffprobe_duration(video_path)
             if abs(expected - actual) > 0.8:
                 logger.warning("Caption timing drift for topic %d: expected %.1fs vs video %.1fs",
@@ -483,6 +557,129 @@ def generate_topic_captions(
         out_paths.append(srt_path)
 
     return out_paths
+
+
+# ---------------------------------------------------------------------------
+# 字幕焼き込み（shorts.burn_captions） — 今しゃべっている1文をルビ付きで大きく表示
+# ---------------------------------------------------------------------------
+
+# 字幕カードを置く帯（templates/slide_shorts.html の .cap-ponte の右隣）。
+# 下端 1480 = Shorts下部UI（タイトル帯・ボタン列 ~430px）より上。
+_CAPTION_BOX = {"x": 236, "bottom": 1480, "width": 808, "height": 320}
+
+_DAY_ACCENTS = {
+    "day-mon": "#1976d2", "day-tue": "#388e3c", "day-wed": "#00796b", "day-thu": "#ef6c00",
+    "day-fri": "#d81b60", "day-sat": "#7b1fa2", "day-sun": "#d32f2f",
+}
+
+_CAPTION_HTML = """<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8"><style>
+* {{ margin:0; padding:0; box-sizing:border-box; }}
+html, body {{ width:{w}px; height:{h}px; background:transparent; overflow:hidden; }}
+body {{ display:flex; align-items:flex-end; font-family:'Noto Sans JP','Yu Gothic','Meiryo',sans-serif; }}
+.cap {{ width:100%; background:rgba(22,30,42,.92); color:#fff; border-radius:28px;
+  border-left:14px solid {accent}; padding:30px 36px 32px; box-shadow:0 12px 30px rgba(0,0,0,.28);
+  font-size:{fs}px; font-weight:700; line-height:1.62; letter-spacing:.01em; word-break:auto-phrase; overflow-wrap:anywhere; }}
+ruby {{ ruby-position:over; ruby-align:center; white-space:nowrap; }}
+rt {{ font-size:0.40em; font-weight:500; color:#ffe082; letter-spacing:0; }}
+</style></head><body><div class="cap">{text}</div></body></html>"""
+
+
+def _caption_font_size(display_len: int) -> int:
+    """字幕カードの文字サイズ（長い片ほど小さくして3行以内に収める）."""
+    if display_len <= 24:
+        return 54
+    if display_len <= 34:
+        return 50
+    return 46
+
+
+async def _render_caption_pngs(texts: list[str], out_dir: Path, accent: str) -> list[Path]:
+    """字幕テキスト（ルビ記法付き）を透過PNGに描画する（1キュー=1枚）."""
+    from playwright.async_api import async_playwright
+    import slide_generator as sg
+
+    w, h = _CAPTION_BOX["width"], _CAPTION_BOX["height"]
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths: list[Path] = []
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page(viewport={"width": w, "height": h})
+        for idx, raw in enumerate(texts, 1):
+            text_html = sg.apply_ruby(raw)
+            # 帯の高さに収まらない場合は段階的に縮小して再描画（帯の上へはみ出さない）
+            for fs in (_caption_font_size(len(serif_to_caption_text(raw))), 42, 38, 34):
+                await page.set_content(
+                    _CAPTION_HTML.format(w=w, h=h, accent=accent, fs=fs, text=text_html),
+                    wait_until="networkidle")
+                fits = await page.evaluate(
+                    "(h) => document.querySelector('.cap').getBoundingClientRect().height <= h", h)
+                if fits:
+                    break
+            else:
+                logger.warning("Caption still overflows at 34px: %s", serif_to_caption_text(raw))
+            path = out_dir / f"cap_{idx:02d}.png"
+            await page.screenshot(path=str(path), omit_background=True)
+            paths.append(path)
+        await browser.close()
+    return paths
+
+
+def burn_topic_captions(
+    video_path: Path,
+    cues: list[tuple[float, float, str]],
+    work_dir: Path,
+    date_str: str,
+    fps: int = 30,
+) -> Path:
+    """トピック動画に音声同期のルビ付き字幕カードを焼き込む（動画を置き換える）.
+
+    キューは途切れないよう次キューの開始まで表示を延長する（読点・文間の
+    無音で字幕がチカチカ消えるのを防ぐ）。音声はそのままコピーする。
+    """
+    import asyncio
+    import shutil
+    import subprocess
+
+    if not cues:
+        logger.warning("No caption cues for %s — skip burn", video_path)
+        return video_path
+    import slide_generator as sg
+    accent = _DAY_ACCENTS.get(sg.get_day_class(date_str), "#1976d2")
+
+    if work_dir.exists():
+        shutil.rmtree(work_dir)
+    pngs = asyncio.run(_render_caption_pngs([c[2] for c in cues], work_dir, accent))
+
+    duration = _ffprobe_duration(video_path)
+    x = _CAPTION_BOX["x"]
+    y = _CAPTION_BOX["bottom"] - _CAPTION_BOX["height"]
+    chains = []
+    prev = "[0:v]"
+    for k, (start, _end, _txt) in enumerate(cues):
+        nxt_start = cues[k + 1][0] if k + 1 < len(cues) else duration + 1.0
+        label = f"[v{k + 1}]"
+        chains.append(
+            f"{prev}[{k + 1}:v]overlay=x={x}:y={y}:enable='between(t,{start:.3f},{nxt_start:.3f})'{label}")
+        prev = label
+
+    tmp_out = video_path.with_name(video_path.stem + ".captioned.mp4")
+    cmd = ["ffmpeg", "-y", "-loglevel", "error", "-i", str(video_path)]
+    for png in pngs:
+        cmd += ["-i", str(png)]
+    cmd += [
+        "-filter_complex", ";".join(chains),
+        "-map", prev, "-map", "0:a?",
+        "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
+        "-r", str(fps), "-c:a", "copy", "-movflags", "+faststart",
+        str(tmp_out),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if result.returncode != 0:
+        tmp_out.unlink(missing_ok=True)
+        raise RuntimeError(f"Caption burn failed for {video_path}: {result.stderr[-800:]}")
+    tmp_out.replace(video_path)
+    logger.info("Captions burned: %s (%d cues)", video_path, len(cues))
+    return video_path
 
 
 def build_topic_shorts(
@@ -585,6 +782,17 @@ def build_topic_shorts(
                 result.rename(final_path)
             logger.info("Topic short generated: %s", final_path)
             outputs.append(final_path)
+
+        # 字幕焼き込み: スライドはセリフ全文を描かない設計なので、焼き込み失敗は
+        # 「画面に何も出ない動画」になる → 致命扱いで止める
+        # （ロールバック: config.shorts.burn_captions=false で従来のセリフカード表示）
+        if shorts_cfg.get("burn_captions", False):
+            fps = config["video"].get("fps", 30)
+            for i, (cues, _expected) in enumerate(compute_topic_cues(date_str, config), 1):
+                if i > len(outputs):
+                    break
+                burn_topic_captions(outputs[i - 1], cues, state_dir / "captions_png" / f"topic{i}",
+                                    date_str, fps=fps)
 
         # 字幕（SRT）を生成（非致命: 失敗しても動画ビルドは成功扱い）
         try:
