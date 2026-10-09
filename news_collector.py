@@ -135,8 +135,13 @@ def deduplicate_against_past(
 
     for i in range(1, lookback_days + 1):
         past_dt = current_dt - timedelta(days=i)
-        past_path = state_dir / f"news_{past_dt.strftime('%Y%m%d')}.json"
-        if not past_path.exists():
+        past_name = f"news_{past_dt.strftime('%Y%m%d')}.json"
+        # Past files are often archived to state/old by hand; check there too.
+        past_path = next(
+            (p for p in (state_dir / past_name, state_dir / "old" / past_name) if p.exists()),
+            None,
+        )
+        if past_path is None:
             continue
         try:
             with open(past_path, encoding="utf-8") as f:
