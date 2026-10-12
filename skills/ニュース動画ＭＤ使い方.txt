@@ -1,0 +1,29 @@
+ai-news.md:
+・PonteのAIニュース形式
+・今日のAIニュースを、WEB上で検索、まとめて２分程度の動画にまとめる
+
+custom-news.md
+・PonteのAIニュース形式
+・自分で話題をインプットして、WEB検索してまとめて動画にする仕様
+
+
+youtube-upload.md
+・Youtubeへのアップロードスキル（下記参照）
+
+
+YoutubeアップロードMD　使い方
+
+/youtube-upload                     │ 今日の動画をアップロード 
+
+/youtube-upload 20260514            │ 指定日の動画をアップロード 
+
+ /youtube-upload --preview-only      │ メタデータ確認のみ（アップロードしない）
+
+/youtube-upload --shorts-only       │ Shortsだけアップロード
+
+ /youtube-upload --regular-only      │ 通常版だけアップロード 
+
+/youtube-upload 20260514 --topic 車 │ カスタムトピックのメタデータでアップロード
+
+
+
