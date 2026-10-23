@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 # 旧実装（漢字の連なりだけをpykakasiに渡す方式）は送り仮名の文脈が失われ
 # 誤読が多発した（作(さく)る・賢(さとし)くなる・見逃(けんとう)せない等）ため廃止。
 
+from cleaning import cleaning_short
 from ruby_engine import annotate_ruby, strip_kanji_ruby
 
 
@@ -59,6 +60,7 @@ SCRIPT_SYSTEM_PROMPT_TEMPLATE = """\
 AI初心者の大人向けYouTubeチャンネル「ポンテのAI教室」で{topic}ニュースを、
 1ニュース=1本・60秒前後のショート動画として紹介します。
 視聴者は専門知識のない大人（仕事や家庭で忙しく、AIの話題についていきたい人）です。
+{cleaning}
 
 ポンテの口調ルール:
 - やさしくてわかりやすい言葉を使う。専門用語は必ずかんたんな言葉で言い換える
@@ -80,6 +82,9 @@ AI初心者の大人向けYouTubeチャンネル「ポンテのAI教室」で{to
 - 「？」で終わる問いかけ型も可。記事タイトルの逐語コピーは禁止
 - 必ず「何がどうなった」まで言い切った完結した文にする（英字の製品名で文字数を使い切り、
   「〜でローカル」のように途中で切れた見出しは禁止。製品名は短く、結論の言葉を優先する）
+- 見出しには読みがなのカッコ書きを付けない（✕「Claude(クロード)が…」→ ○「Claudeが…」）
+- 数字は元の事実どおりに使う（「500万行のコードを分析して493件発見」を
+  「500万行のバグ」のように、数字の対象をすり替えない）
 
 紹介セリフ(intro)のルール（動画の冒頭3秒が勝負）:
 - 挨拶・前置きは禁止（「みんなー」「今日は」「次のニュースは」などで始めない）
@@ -138,7 +143,7 @@ JSON形式のみで回答（説明文不要）。
 """
 
 # Backward compatibility
-SCRIPT_SYSTEM_PROMPT = SCRIPT_SYSTEM_PROMPT_TEMPLATE.format(topic="AI")
+SCRIPT_SYSTEM_PROMPT = SCRIPT_SYSTEM_PROMPT_TEMPLATE.format(topic="AI", cleaning=cleaning_short())
 
 
 # ---------------------------------------------------------------------------
@@ -206,10 +211,20 @@ def _trim_serif_to_limit(text: str, limit: int) -> str:
     return out
 
 
+# 読みがなのカッコ書き（Claude(クロード)・漢字(かんじ)）。題名・要点には残さない
+# （スライド表示時に ruby_dict で付け直されるため、データ側は素の文字列にする）
+_READING_PARENS_RE = re.compile(r"[(（][ぁ-んァ-ヶー・ ]+[)）]")
+
+
+def strip_reading_parens(text) -> str:
+    """読みがなのカッコ書きを除去し、空白を正規化する."""
+    t = _READING_PARENS_RE.sub("", str(text or ""))
+    return re.sub(r"\s+", " ", t).strip()
+
+
 def _clean_point(p) -> str:
     """要点1個を表示用に整える（空白正規化・LLMが付けた読み/句点/括弧を除去）."""
-    t = re.sub(r"\s+", " ", str(p or "")).strip()
-    t = re.sub(r"[(（][ぁ-んァ-ヶー]+[)）]", "", t)  # ルビ記法は表示時に付け直す
+    t = strip_reading_parens(p)  # ルビ記法は表示時に付け直す
     return t.strip("「」『』。・-－ ")
 
 
@@ -225,40 +240,56 @@ def normalize_points(points) -> list[str]:
     return out[:_POINTS_COUNT]
 
 
+def _article_issues(i: int, a: dict) -> list[str]:
+    """記事1件の台本の問題（文字数・要点数）をLLMへのフィードバック文で返す."""
+    issues = []
+    # 過長な見出しは後段で機械的に切り詰めるしかなく語の途中で切れるため、
+    # 文字数超過はLLMに作り直させる（読みがなのカッコ書きは数えない＝表示される長さ）
+    hook = str(a.get("hook_title") or "")
+    n = len(strip_reading_parens(hook))
+    if n > _HOOK_TITLE_MAX:
+        issues.append(f"ニュース{i}のhook_titleが長すぎます（{n}文字）。"
+                      "15〜24文字の、途中で切れない完結した見出しに作り直してください")
+    elif 0 < n < _HOOK_TITLE_MIN_RETRY:
+        # 「Gemini 4 Argon」のような製品名だけの見出しはフックにならない
+        issues.append(f"ニュース{i}のhook_titleが短すぎます（{n}文字）。"
+                      "製品名だけでなく「何がどうなった」まで言い切る15〜24文字の見出しにしてください")
+    if _READING_PARENS_RE.search(hook):
+        issues.append(f"ニュース{i}のhook_titleに読みがなのカッコ書きがあります。"
+                      "動画タイトルになるので読みがなを外してください")
+    n = _tts_len(a.get("intro", ""))
+    if n > _INTRO_TTS_LIMIT:
+        issues.append(f"ニュース{i}のintroが長すぎます（読み上げ{n}文字）。50〜70文字に短縮してください")
+    n = _tts_len(a.get("explanation", ""))
+    if n > _EXPLANATION_TTS_LIMIT:
+        issues.append(f"ニュース{i}のexplanationが長すぎます（読み上げ{n}文字）。90〜120文字に短縮してください")
+    n = _tts_len(a.get("insight", ""))
+    if n > _INSIGHT_TTS_LIMIT:
+        issues.append(f"ニュース{i}のinsightが長すぎます（読み上げ{n}文字）。30〜55文字に短縮してください")
+    pts = a.get("points")
+    if not isinstance(pts, list) or len(pts) < _POINTS_COUNT:
+        issues.append(f"ニュース{i}のpointsが3個ありません。要約の事実から8〜18文字の要点を3個作ってください")
+    else:
+        for p in pts:
+            if len(_clean_point(p)) > _POINT_MAX:
+                issues.append(f"ニュース{i}のpoints「{p}」が長すぎます。8〜18文字に短縮してください")
+    return issues
+
+
+def _global_issues(result: dict) -> list[str]:
+    """記事に属さない項目（エンディング）の問題を返す."""
+    n = _tts_len(result.get("ending", ""))
+    if n > _ENDING_TTS_LIMIT:
+        return [f"endingが長すぎます（読み上げ{n}文字）。40〜60文字に短縮してください"]
+    return []
+
+
 def _validate_script_lengths(result: dict) -> list[str]:
     """セリフの読み上げ文字数を検証し、超過項目のフィードバック文を返す."""
     issues = []
     for i, a in enumerate(result.get("articles", []), 1):
-        # 過長な見出しは後段で機械的に切り詰めるしかなく語の途中で切れるため、
-        # 文字数超過はLLMに作り直させる（normalize_hook_titles と同じ数え方）
-        n = len(re.sub(r"\s+", " ", str(a.get("hook_title") or "")).strip())
-        if n > _HOOK_TITLE_MAX:
-            issues.append(f"ニュース{i}のhook_titleが長すぎます（{n}文字）。"
-                          "15〜24文字の、途中で切れない完結した見出しに作り直してください")
-        elif 0 < n < _HOOK_TITLE_MIN_RETRY:
-            # 「Gemini 4 Argon」のような製品名だけの見出しはフックにならない
-            issues.append(f"ニュース{i}のhook_titleが短すぎます（{n}文字）。"
-                          "製品名だけでなく「何がどうなった」まで言い切る15〜24文字の見出しにしてください")
-        n = _tts_len(a.get("intro", ""))
-        if n > _INTRO_TTS_LIMIT:
-            issues.append(f"ニュース{i}のintroが長すぎます（読み上げ{n}文字）。50〜70文字に短縮してください")
-        n = _tts_len(a.get("explanation", ""))
-        if n > _EXPLANATION_TTS_LIMIT:
-            issues.append(f"ニュース{i}のexplanationが長すぎます（読み上げ{n}文字）。90〜120文字に短縮してください")
-        n = _tts_len(a.get("insight", ""))
-        if n > _INSIGHT_TTS_LIMIT:
-            issues.append(f"ニュース{i}のinsightが長すぎます（読み上げ{n}文字）。30〜55文字に短縮してください")
-        pts = a.get("points")
-        if not isinstance(pts, list) or len(pts) < _POINTS_COUNT:
-            issues.append(f"ニュース{i}のpointsがありません。要約の事実から8〜18文字の要点を3個作ってください")
-        else:
-            for p in pts:
-                if len(_clean_point(p)) > _POINT_MAX:
-                    issues.append(f"ニュース{i}のpoints「{p}」が長すぎます。8〜18文字に短縮してください")
-    n = _tts_len(result.get("ending", ""))
-    if n > _ENDING_TTS_LIMIT:
-        issues.append(f"endingが長すぎます（読み上げ{n}文字）。40〜60文字に短縮してください")
-    return issues
+        issues += _article_issues(i, a)
+    return issues + _global_issues(result)
 
 
 def _cap_script_lengths(result: dict) -> dict:
@@ -282,50 +313,146 @@ def _cap_script_lengths(result: dict) -> dict:
     return result
 
 
+# 1記事の台本が持つキー（部分修正のマージ対象）
+_ARTICLE_KEYS = ("label", "hook_title", "intro", "explanation", "insight", "points")
+
+
+def _article_source_block(i: int, article: dict) -> str:
+    """LLMに渡す元記事の材料（タイトル・要約・使える事実）."""
+    # リッチ要約（summary_ja_long/facts/kid_angle）があれば優先使用（旧JSON互換）
+    summary = (article.get("summary_ja_long")
+               or article.get("summary_ja", article.get("summary", "")))
+    lines = [
+        f"ニュース{i}:",
+        f"  タイトル: {article.get('title_ja', article.get('title', ''))}",
+        f"  要約: {summary}",
+    ]
+    facts = article.get("facts")
+    if isinstance(facts, list) and facts:
+        lines.append("  使える事実: " + " / ".join(str(f) for f in facts))
+    if article.get("kid_angle"):
+        lines.append(f"  生活・仕事との関係: {article['kid_angle']}")
+    lines.append(f"  ソース: {article.get('source', '')}")
+    return "\n".join(lines)
+
+
+def _parse_json_object(text: str) -> dict:
+    """LLM応答から最初の { 〜最後の } をJSONとして取り出す."""
+    text = (text or "").strip()
+    if "{" not in text:
+        raise ValueError(f"No JSON object in response: {text[:200]}")
+    return json.loads(text[text.index("{"):text.rindex("}") + 1])
+
+
+def _merge_repair(result: dict, repaired: dict) -> int:
+    """部分修正の応答を台本にマージする。問題が減らない修正は採用しない.
+
+    記事ごとに「修正後の問題数 <= 修正前」のときだけ置き換えるので、
+    1か所直すと別の記事が崩れる（全体再生成の）もぐら叩きが起きない。
+    Returns: 採用した修正の件数。
+    """
+    accepted = 0
+    arts = result.get("articles", [])
+    for item in repaired.get("articles") or []:
+        if not isinstance(item, dict):
+            continue
+        try:
+            idx = int(item.get("index"))
+        except (TypeError, ValueError):
+            continue
+        if not 1 <= idx <= len(arts):
+            continue
+        before = arts[idx - 1]
+        cand = dict(before)
+        cand.update({k: v for k, v in item.items() if k in _ARTICLE_KEYS and v})
+        if len(_article_issues(idx, cand)) <= len(_article_issues(idx, before)):
+            arts[idx - 1] = cand
+            accepted += 1
+    ending = repaired.get("ending")
+    if ending and isinstance(ending, str):
+        cand = dict(result, ending=ending)
+        if len(_global_issues(cand)) <= len(_global_issues(result)):
+            result["ending"] = ending
+            accepted += 1
+    return accepted
+
+
+def _repair_script(client, system_prompt: str, result: dict, articles: list[dict],
+                   max_tokens: int, max_rounds: int) -> dict:
+    """問題のある記事・項目だけをLLMに直させる（問題のない部分はそのまま残す）."""
+    for rnd in range(1, max_rounds + 1):
+        bad = {i: iss for i, a in enumerate(result.get("articles", []), 1)
+               if (iss := _article_issues(i, a))}
+        gl = _global_issues(result)
+        if not bad and not gl:
+            return result
+        logger.info("Script repair round %d/%d: %s", rnd, max_rounds,
+                    " / ".join(sum(bad.values(), []) + gl))
+        parts = []
+        for i, iss in bad.items():
+            cur = {k: result["articles"][i - 1].get(k, "") for k in _ARTICLE_KEYS}
+            parts.append(
+                _article_source_block(i, articles[i - 1] if i - 1 < len(articles) else {})
+                + "\n  現在の台本: " + json.dumps(dict(index=i, **cur), ensure_ascii=False)
+                + "\n  直すこと:\n  - " + "\n  - ".join(iss)
+            )
+        if gl:
+            parts.append(f"エンディング（現在）: {result.get('ending', '')}\n  直すこと:\n  - "
+                         + "\n  - ".join(gl))
+        prompt = (
+            "以下の台本には問題があります。「直すこと」に書かれた項目だけを直してください。\n"
+            "直すことに書かれていない項目は一字一句変えずに、そのまま返してください。\n"
+            "事実は各ニュースの要約・使える事実だけを使ってください。\n\n"
+            + "\n\n".join(parts)
+            + '\n\nJSON形式で回答（直したニュースだけ。indexは上と同じ番号）:\n'
+            '{"articles": [{"index": 1, "label": "...", "hook_title": "...", "intro": "...",'
+            ' "explanation": "...", "insight": "...", "points": ["...", "...", "..."]}]'
+            + (', "ending": "..."' if gl else "") + "}"
+        )
+        try:
+            repaired = _parse_json_object(client.generate(system_prompt, prompt, max_tokens))
+        except Exception as e:
+            logger.warning("Script repair round %d failed (keeping current script): %s", rnd, e)
+            break
+        if _merge_repair(result, repaired) == 0:
+            logger.info("Script repair round %d: no improving fix accepted", rnd)
+    return result
+
+
 def generate_article_scripts(
     articles: list[dict],
     llm_config: dict,
     topic: str = "AI",
     max_retries: int = 2,
+    max_repair_rounds: int = 3,
 ) -> dict:
-    """Generate intro and explanation scripts for each article (with retry)."""
+    """Generate intro and explanation scripts for each article.
+
+    1回生成したあとは、問題のある記事・項目だけを部分修正する（全体の再生成はしない。
+    以前は全体を作り直していたため、直すたびに別の記事が崩れて問題数が増減していた）。
+    max_retries は生成自体の失敗（JSONが壊れている等）のリトライ回数。
+    """
     from api_utils import LLMClient
     import time
 
     client = LLMClient(llm_config)
     max_tokens = llm_config.get(llm_config.get("provider", "gemini"), {}).get("max_tokens_script", 8000)
-    system_prompt = SCRIPT_SYSTEM_PROMPT_TEMPLATE.format(topic=topic)
+    system_prompt = SCRIPT_SYSTEM_PROMPT_TEMPLATE.format(topic=topic, cleaning=cleaning_short())
 
-    prompt_parts = []
-    for i, article in enumerate(articles, 1):
-        # リッチ要約（summary_ja_long/facts/kid_angle）があれば優先使用（旧JSON互換）
-        summary = (article.get("summary_ja_long")
-                   or article.get("summary_ja", article.get("summary", "")))
-        lines = [
-            f"ニュース{i}:",
-            f"  タイトル: {article.get('title_ja', article['title'])}",
-            f"  要約: {summary}",
-        ]
-        facts = article.get("facts")
-        if isinstance(facts, list) and facts:
-            lines.append("  使える事実: " + " / ".join(str(f) for f in facts))
-        if article.get("kid_angle"):
-            lines.append(f"  生活・仕事との関係: {article['kid_angle']}")
-        lines.append(f"  ソース: {article.get('source', '')}")
-        prompt_parts.append("\n".join(lines))
+    prompt_parts = [_article_source_block(i, a) for i, a in enumerate(articles, 1)]
 
     user_prompt = (
         "以下のニュースそれぞれについて、ポンテの口調でフック見出し・紹介文・解説文・考察を生成してください。\n"
         "また、エンディングのセリフも1つ生成してください。\n"
         "さらに、ニュース全体から重要な専門用語をちょうど3個抽出し、keywordsとして返してください。\n"
         "漢字にふりがなは付けないでください（自動付与されます）。"
-        "英語の言葉にはカタカナ読み（例: Siri(シリ)）を付けてください。\n\n"
+        "英語の言葉にはカタカナ読み（例: Siri(シリ)）を付けてください（ただしhook_titleとpointsには付けない）。\n\n"
         + "\n\n".join(prompt_parts)
         + '\n\nJSON形式で回答:\n'
         '{\n'
         '  "articles": [\n'
         '    {"label": "ニュースの内容がわかる12〜18文字の短い見出し（「ニュース1」のような番号だけのラベルは禁止）",'
-        ' "hook_title": "動画タイトルになるフック見出し（15〜24文字。固有名詞・数字入りで言い切る）",'
+        ' "hook_title": "動画タイトルになるフック見出し（15〜24文字。固有名詞・数字入りで言い切る。読みがな不要）",'
         ' "intro": "紹介セリフ（50〜70文字。挨拶禁止・1文目で一番驚く事実を言い切る）",'
         ' "explanation": "解説セリフ（90〜120文字）",'
         ' "insight": "ポンテの考察（30〜55文字。独自の意見・ツッコミ・予想）",'
@@ -339,9 +466,7 @@ def generate_article_scripts(
     )
 
     last_error: Exception | None = None
-    best_result: dict | None = None
-    best_issue_count = 10**9
-    feedback = ""
+    result: dict | None = None
     for attempt in range(max_retries + 1):
         text = ""
         try:
@@ -349,43 +474,269 @@ def generate_article_scripts(
                 wait = 2 ** attempt
                 logger.info("Script generation retry %d/%d after %ds...", attempt, max_retries, wait)
                 time.sleep(wait)
-
-            text = client.generate(system_prompt, user_prompt + feedback, max_tokens)
-            text = (text or "").strip()
-
-            if "{" not in text:
-                raise ValueError(f"No JSON object in response: {text[:200]}")
-            json_str = text[text.index("{"):text.rindex("}") + 1]
-            result = json.loads(json_str)
+            text = client.generate(system_prompt, user_prompt, max_tokens)
+            result = _parse_json_object(text)
             if not result.get("articles"):
                 raise ValueError("Response JSON has no articles")
-
-            # 読み上げ文字数の検証（3分尺の担保）。超過時はフィードバック付きリトライ
-            issues = _validate_script_lengths(result)
-            if not issues:
-                return _cap_script_lengths(result)
-            # 全試行が超過した場合に備え、問題の最も少ない試行を残す
-            # （以前は最後の試行を採用しており、悪化した出力を切り詰めて使うことがあった）
-            if len(issues) <= best_issue_count:
-                best_result, best_issue_count = result, len(issues)
-            logger.info("Script length issues (attempt %d): %s",
-                        attempt + 1, " / ".join(issues))
-            feedback = (
-                "\n\n【前回の出力の問題点】以下を修正して、全体をもう一度生成してください:\n- "
-                + "\n- ".join(issues)
-            )
+            break
         except Exception as e:
+            result = None
             last_error = e
             logger.warning(
                 "Script generation attempt %d/%d failed: %s — raw response head: %r",
-                attempt + 1, max_retries + 1, e, text[:500],
+                attempt + 1, max_retries + 1, e, (text or "")[:500],
             )
+    if result is None:
+        raise ValueError(f"Script generation failed after {max_retries + 1} attempts: {last_error}")
 
-    if best_result is not None:
-        # リトライ後も長い場合は文単位トリムで強制的に収める（フォールバックより良い）
-        logger.warning("Length issues remain after retries — trimming serifs to hard caps")
-        return _cap_script_lengths(best_result)
-    raise ValueError(f"Script generation failed after {max_retries + 1} attempts: {last_error}")
+    # 問題のある項目だけ部分修正 → それでも残る超過は文単位トリムで強制的に収める
+    result = _repair_script(client, system_prompt, result, articles, max_tokens, max_repair_rounds)
+    remaining = _validate_script_lengths(result)
+    if remaining:
+        logger.warning("Script issues remain after repair — trimming to hard caps: %s",
+                       " / ".join(remaining))
+    return _cap_script_lengths(result)
+
+
+# ---------------------------------------------------------------------------
+# Fact check（生成役とは別の確認役。元記事の要約・事実だけと照合する）
+# ---------------------------------------------------------------------------
+
+FACTCHECK_SYSTEM_PROMPT = """\
+あなたはニュース動画の事実確認担当です。台本を書いた人とは別の、独立した確認役です。
+__CLEANING__
+台本の各項目を、与えられた「要約」「使える事実」だけと照合し、次に当たるものを指摘してください:
+- 元記事にない事実・数字・固有名詞・会社名
+- 元記事と矛盾する内容（数字の対象のすり替え、主語・対象の取り違え。
+  例: 「500万行のコードを分析し493件の問題を発見」を「500万行のバグ」と言う、
+  マウスの脳細胞データの研究を「脳を解析」と人間の話のように言う）
+- 誇張・断定しすぎ（元記事が「可能性」「研究段階」「限定提供」「報告」なのに、確定・一般化して言う。
+  研究成果を「治療法開発」「実用化」に飛躍させる、「数カ月〜1年」を「1年」と言い切る など）
+指摘しないもの: 口調、言い回し、わかりやすい言い換え、たとえ話、カッコ内の読みがな、
+文字数や要点の個数などの形式（形式は別の仕組みで確認する）。
+確認して問題がなかった項目は issues に入れない（「問題ない」「許容範囲」と書く指摘は出さない）。
+
+指摘には重さ(severity)を付ける:
+- "error": 視聴者が事実を誤解する（数字・対象・主語の誤り、元記事にない事実、可能性や研究段階を確定と言う）
+- "minor": 事実としては正しいが、細部を省いている・より正確に言える・ニュアンスが少し違う
+元記事のすべての事実を台本に入れる必要はない。省略は誤りではない（minor にもしない）。
+同じ項目に複数の問題があるときは1件にまとめ、fix はそれを全部直した全文にする。
+考察(insight)は意見なので、意見であること自体は問題にしない
+（ただし意見の中に、事実として誤った前提や元記事にない断定があれば指摘する）。
+
+修正案(fix)のルール:
+- その項目の全文を置き換える修正後の文。元の口調と長さ（±10文字）を保ち、問題の箇所だけ直す
+- 正しい数字・固有名詞・言い切りの強さは残す（曖昧でぼんやりした文に薄めない）
+- hook_title: 15〜24文字の完結した見出し。読みがなのカッコ書きを付けない
+- points: ちょうど3個の配列。各8〜18文字の体言止め。読みがなを付けない
+- 漢字にふりがなを付けない
+- 直せない（元記事に材料がない）場合は fix を空文字にする
+
+JSONのみで回答:
+{"articles": [{"index": 1, "issues": [{"field": "hook_title|intro|explanation|insight|points",
+ "severity": "error|minor", "problem": "何がどう違うか（根拠となる元記事の記述も書く）",
+ "fix": "修正後の全文（pointsは配列）"}]}]}
+問題がないニュースは "issues": [] にする。
+"""
+
+_FACTCHECK_FIELDS = ("hook_title", "intro", "explanation", "insight", "points")
+_SERIF_LIMITS = {"intro": _INTRO_TTS_LIMIT, "explanation": _EXPLANATION_TTS_LIMIT,
+                 "insight": _INSIGHT_TTS_LIMIT}
+
+
+def _factcheck_call(client, script_articles: list[dict], articles: list[dict],
+                    indices: list[int], max_tokens: int) -> dict[int, list[dict]]:
+    """指定記事を確認役に照合させ、{記事番号: [指摘]} を返す."""
+    parts = []
+    for i in indices:
+        sa = script_articles[i - 1]
+        script = {k: sa.get(k, "") for k in _FACTCHECK_FIELDS}
+        parts.append(_article_source_block(i, articles[i - 1])
+                     + "\n  台本: " + json.dumps(script, ensure_ascii=False))
+    prompt = "次の台本を元記事と照合してください。\n\n" + "\n\n".join(parts)
+    data = _factcheck_generate(client, prompt, max_tokens)
+    out: dict[int, list[dict]] = {i: [] for i in indices}
+    for item in data.get("articles") or []:
+        try:
+            idx = int(item.get("index"))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if idx in out:
+            # 自動修正・要確認にするのは誤り(error)だけ。細部(minor)まで直させると
+            # 再確認のたびに数字や固有名詞が削られ、見出しがぼんやり劣化する（2026-10-23 実測）
+            out[idx] = [x for x in (item.get("issues") or [])
+                        if isinstance(x, dict) and x.get("field") in _FACTCHECK_FIELDS
+                        and x.get("severity", "error") != "minor"
+                        and not _is_format_only(x)]
+    return out
+
+
+# 事実ではなく形式（個数・文字数）だけを言う指摘。形式はコード側で検証済みなので捨てる
+# （プロンプトで禁じても確認役が出すことがあるため）
+_FORMAT_ONLY_RE = re.compile(r"個数|文字数|\d+個(?:しか|だが|必要|必須|ない|に満た)|ルールでは|配列")
+
+
+def _is_format_only(issue: dict) -> bool:
+    return not issue.get("fix") and bool(_FORMAT_ONLY_RE.search(str(issue.get("problem", ""))))
+
+
+def _factcheck_generate(client, prompt: str, max_tokens: int) -> dict:
+    """確認役を呼ぶ（温度0で判断を安定させ、JSONが崩れたら1回だけやり直す）."""
+    system = FACTCHECK_SYSTEM_PROMPT.replace("__CLEANING__", cleaning_short())
+    last: Exception | None = None
+    for _ in range(2):
+        try:
+            return _parse_json_object(client.generate(system, prompt, max_tokens, temperature=0))
+        except ValueError as e:  # json.JSONDecodeError を含む
+            last = e
+            logger.info("Fact check: malformed JSON, retrying once: %s", e)
+    raise ValueError(f"fact check JSON unreadable: {last}")
+
+
+def _keep_readings(text: str, script_article: dict) -> str:
+    """修正文に、元のセリフの英語読み（OpenAI(オープンエーアイ)等）を引き継ぐ.
+
+    確認役の修正案は読みを落としがちで、落ちると音声が英字読みになるため。
+    """
+    from slide_generator import _apply_ruby_dict, _extract_ruby_dict  # 循環import回避
+    src = " ".join(str(script_article.get(k, "")) for k in ("intro", "explanation", "insight"))
+    return _apply_ruby_dict(text, _extract_ruby_dict(src))
+
+
+def _fix_is_usable(field: str, fix) -> bool:
+    """修正案が文字数・形式のルールを守っているか（守らない修正は自動適用しない）."""
+    if field == "points":
+        return isinstance(fix, list) and len(normalize_points(fix)) == _POINTS_COUNT
+    if not isinstance(fix, str) or not fix.strip():
+        return False
+    if field == "hook_title":
+        n = len(strip_reading_parens(fix))
+        return _HOOK_TITLE_MIN_RETRY <= n <= _HOOK_TITLE_MAX
+    return 0 < _tts_len(fix) <= _SERIF_LIMITS[field]
+
+
+def _field_rule(field: str) -> str:
+    if field == "hook_title":
+        return f"{_HOOK_TITLE_MIN_RETRY}〜24文字の完結した見出し（読みがな不要）"
+    if field == "points":
+        return "ちょうど3個の配列、各8〜18文字"
+    return f"読み上げ{_SERIF_LIMITS[field]}文字以内（カッコ内の読みは数えない）"
+
+
+def _shorten_fixes(client, items: list[dict], max_tokens: int) -> None:
+    """文字数・形式ルールを外れた修正案を、意味を保ったまま規定内に直させる（items を上書き）."""
+    lines = [
+        f'{k}. ニュース{it["index"]}の{it["field"]}（ルール: {_field_rule(it["field"])}）: '
+        + json.dumps(it["fix"], ensure_ascii=False)
+        for k, it in enumerate(items, 1)
+    ]
+    prompt = (
+        "次の修正案は文字数・形式のルールを守っていません。"
+        "事実と意味を変えずに、ルールの範囲に収まるよう書き直してください。\n\n"
+        + "\n".join(lines)
+        + '\n\nJSONのみで回答（番号は上と同じ）: {"fixes": [{"no": 1, "fix": "書き直した全文（pointsは配列）"}]}'
+    )
+    data = _factcheck_generate(client, prompt, max_tokens)
+    for f in data.get("fixes") or []:
+        try:
+            k = int(f.get("no"))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if 1 <= k <= len(items) and f.get("fix"):
+            items[k - 1]["fix"] = f["fix"]
+
+
+def factcheck_and_fix(script_data: dict, articles: list[dict], llm_config: dict,
+                      auto_fix: bool = True, client=None, max_fix_rounds: int = 2) -> dict:
+    """台本を元記事と照合し、誤り・誇張は修正案で自動修正する.
+
+    確認 → 修正 → 修正した記事だけ再確認、を最大 max_fix_rounds 周回す
+    （確認役の修正文に新しい誇張が入ることがあるため、修正後も必ず確認を通す）。
+    ルール外の長さの修正案は1回だけ書き直させてから適用する。
+    Returns: script_meta に保存する報告
+      {"status": ok|fixed|unresolved|error, "articles": [{index, fixed, unresolved}], "error"}
+    """
+    if client is None:
+        from api_utils import LLMClient
+        client = LLMClient(llm_config)
+    max_tokens = llm_config.get(llm_config.get("provider", "gemini"), {}).get(
+        "max_tokens_factcheck", 3000)
+    sarts = script_data.get("articles", [])
+    n = min(len(sarts), len(articles))
+    report = {i: {"index": i, "fixed": [], "unresolved": []} for i in range(1, n + 1)}
+    rounds = max_fix_rounds if auto_fix else 0
+    pending = list(range(1, n + 1))
+    checked_once = False
+    try:
+        for rnd in range(rounds + 1):
+            found = _factcheck_call(client, sarts, articles, pending, max_tokens)
+            checked_once = True
+            issues = [dict(iss, index=i) for i, lst in found.items() for iss in lst]
+            if rnd == rounds:  # 最後の確認: 残った指摘は人の確認へ
+                for iss in issues:
+                    report[iss["index"]]["unresolved"].append(
+                        {"field": iss["field"], "problem": iss.get("problem", ""),
+                         "suggestion": iss.get("fix") or ""})
+                break
+            # 修正案があるのにルール外の長さ → まとめて1回書き直させる
+            too_long = [iss for iss in issues
+                        if iss.get("fix") and not _fix_is_usable(iss["field"], iss["fix"])]
+            if too_long:
+                try:
+                    _shorten_fixes(client, too_long, max_tokens)
+                except Exception as e:
+                    logger.warning("Fact check: shortening fixes failed: %s", e)
+            touched: list[int] = []
+            done_fields: set[tuple[int, str]] = set()
+            for iss in issues:
+                i, field, fix = iss["index"], iss["field"], iss.get("fix")
+                # 同じ項目への2件目の修正案は元の文から作られており、1件目の修正を
+                # 打ち消しうるので適用しない（再確認で残っていれば改めて指摘される）
+                if (i, field) in done_fields:
+                    continue
+                if _fix_is_usable(field, fix):
+                    done_fields.add((i, field))
+                    before = sarts[i - 1].get(field, "")
+                    if field == "points":
+                        sarts[i - 1][field] = normalize_points(fix)
+                    elif field == "hook_title":
+                        sarts[i - 1][field] = strip_reading_parens(fix)
+                    else:
+                        sarts[i - 1][field] = _keep_readings(fix.strip(), sarts[i - 1])
+                    report[i]["fixed"].append({"field": field, "problem": iss.get("problem", ""),
+                                               "before": before, "after": sarts[i - 1][field]})
+                    if i not in touched:
+                        touched.append(i)
+            # 直せなかった指摘: その記事を再確認しない（＝直していない）なら、ここで要確認に回す
+            # （直した記事の指摘は次の再確認で、残っていれば改めて報告される）
+            for iss in issues:
+                if iss["index"] not in touched and not _fix_is_usable(iss["field"], iss.get("fix")):
+                    report[iss["index"]]["unresolved"].append(
+                        {"field": iss["field"], "problem": iss.get("problem", ""),
+                         "suggestion": iss.get("fix") or ""})
+            if not touched:
+                break
+            pending = touched
+    except Exception as e:
+        if not checked_once:
+            logger.warning("Fact check failed (script kept as is — review manually): %s", e)
+            return {"status": "error", "error": str(e), "articles": list(report.values())}
+        # 再確認だけ失敗: ここまでの修正は残し、再確認できなかった記事を要確認にする
+        logger.warning("Fact check re-check failed (fixes kept; review manually): %s", e)
+        for i in pending:
+            report[i]["unresolved"].append({"field": "", "problem": f"修正後の再確認に失敗: {e}",
+                                            "suggestion": ""})
+
+    arts = list(report.values())
+    if any(a["unresolved"] for a in arts):
+        status = "unresolved"
+    elif any(a["fixed"] for a in arts):
+        status = "fixed"
+    else:
+        status = "ok"
+    logger.info("Fact check: %s (fixed %d, unresolved %d)", status,
+                sum(len(a["fixed"]) for a in arts), sum(len(a["unresolved"]) for a in arts))
+    return {"status": status, "error": "", "articles": arts}
 
 
 def _drop_last_sentence(text: str) -> str:
@@ -783,9 +1134,13 @@ def _truncate_hook_title(t: str, limit: int) -> str:
 
 
 def normalize_hook_titles(script_data: dict, news_articles: list[dict]) -> dict:
-    """各記事の hook_title を検証・補正する（欠落・過長は記事タイトルから決定的に生成）."""
+    """各記事の hook_title を検証・補正する（欠落・過長は記事タイトルから決定的に生成）.
+
+    読みがなのカッコ書き（Claude(クロード)等）は動画タイトルにそのまま出るため必ず外す
+    （スライドの大見出しにはセリフ由来のルビ辞書で付け直される）。
+    """
     for sa, na in zip(script_data.get("articles", []), news_articles):
-        hook = re.sub(r"\s+", " ", str(sa.get("hook_title") or "")).strip()
+        hook = strip_reading_parens(sa.get("hook_title"))
         if not hook or len(hook) > _HOOK_TITLE_MAX:
             # 過長なLLM見出しは記事タイトルより情報量が多いので、捨てずに切り詰めを優先する
             fallback = _fallback_hook_title(hook) if hook else ""
@@ -880,6 +1235,17 @@ def generate_script(
     date_str = news_data.get("date", datetime.now(_JST).strftime("%Y%m%d"))
     topic_label = topic if topic else news_data.get("topic", "AI")
 
+    # 1ニュース=1本Shorts運用では、動画にする上位N本だけ台本を作る
+    # （使わない記事の生成・修正にLLMを使わない。news JSON 自体は全件のまま）
+    daily_enabled = config.get("pipeline", {}).get("daily_video_enabled", True)
+    shorts_cfg = config.get("shorts", {})
+    if not daily_enabled and shorts_cfg.get("per_topic", False):
+        top_n = shorts_cfg.get("topics_per_day", 3)
+        if len(news_data.get("articles", [])) > top_n:
+            logger.info("Script: generating only the top %d of %d articles (per-topic Shorts)",
+                        top_n, len(news_data["articles"]))
+            news_data = dict(news_data, articles=news_data["articles"][:top_n])
+
     # Generate scripts via LLM (with fallback)
     allow_fallback = config.get("script", {}).get("allow_fallback", True)
     script_source = "llm"
@@ -898,10 +1264,21 @@ def generate_script(
     # hook_title の検証・補正（欠落・過長は記事タイトルから決定的に生成）
     script_data = normalize_hook_titles(script_data, news_data["articles"])
 
+    # 事実確認（生成役とは別の確認役）。誤り・誇張は修正案で自動修正し、
+    # 直せなかったものは script_meta / review レポートに「要確認」として残す
+    fc_cfg = config.get("script", {}).get("factcheck", {})
+    if script_source != "llm":
+        factcheck = {"status": "skipped", "error": "fallback script", "articles": []}
+    elif not fc_cfg.get("enabled", True):
+        factcheck = {"status": "skipped", "error": "disabled", "articles": []}
+    else:
+        factcheck = factcheck_and_fix(script_data, news_data["articles"], llm_cfg,
+                                      auto_fix=fc_cfg.get("auto_fix", True))
+        script_data = normalize_hook_titles(script_data, news_data["articles"])
+
     # 3分尺の最終保証は16:9まとめ動画専用。1ニュース=1本Shorts運用
     # （pipeline.daily_video_enabled=false）では各セリフの個別上限だけで
     # 1本60秒前後が保証されるため、全体トリムはスキップする
-    daily_enabled = config.get("pipeline", {}).get("daily_video_enabled", True)
     if daily_enabled:
         max_est = config.get("script", {}).get("max_estimated_sec", 205)
         script_data = enforce_duration_budget(script_data, news_data["articles"], max_est)
@@ -951,6 +1328,8 @@ def generate_script(
             }
             for a in script_data.get("articles", [])
         ],
+        # 事実確認の結果（status: ok / fixed / unresolved / error / skipped）
+        "factcheck": factcheck,
     }
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)

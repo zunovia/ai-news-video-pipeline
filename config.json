@@ -50,7 +50,11 @@
   },
   "script": {
     "allow_fallback": true,
-    "max_estimated_sec": 205
+    "max_estimated_sec": 205,
+    "factcheck": {
+      "enabled": true,
+      "auto_fix": true
+    }
   },
   "tts": {
     "provider": "voicevox",

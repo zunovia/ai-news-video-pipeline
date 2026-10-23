@@ -51,6 +51,57 @@ def save_state(state_path: Path, state: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# VOICEVOX（TTSエンジン）の自動起動
+# ---------------------------------------------------------------------------
+
+_VOICEVOX_DEFAULT_ENGINE = r"C:\Users\zunov\AppData\Local\Programs\VOICEVOX\vv-engine\run.exe"
+
+
+def _voicevox_alive(base_url: str) -> bool:
+    import urllib.request
+    try:
+        with urllib.request.urlopen(f"{base_url.rstrip('/')}/version", timeout=3) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def ensure_voicevox(config_path: Path, wait_sec: int = 90) -> None:
+    """TTSがVOICEVOXなら、エンジンが応答しない場合に非表示で起動して待つ.
+
+    起動できなければ例外（動画フェーズの途中でTTSが全滅するより先に止める）。
+    """
+    import subprocess
+    import time
+    from urllib.parse import urlparse
+
+    tts = load_config(config_path).get("tts", {})
+    if tts.get("provider") != "voicevox":
+        return
+    opts = tts.get("options", {})
+    base_url = opts.get("base_url", "http://localhost:50021")
+    if _voicevox_alive(base_url):
+        return
+    engine = Path(opts.get("engine_path", _VOICEVOX_DEFAULT_ENGINE))
+    if not engine.exists():
+        raise RuntimeError(f"VOICEVOX is not running and engine not found: {engine}")
+    port = str(urlparse(base_url).port or 50021)
+    logger.info("VOICEVOX not responding — starting %s (port %s)", engine, port)
+    subprocess.Popen(
+        [str(engine), "--host", "127.0.0.1", "--port", port],
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+    deadline = time.monotonic() + wait_sec
+    while time.monotonic() < deadline:
+        time.sleep(3)
+        if _voicevox_alive(base_url):
+            logger.info("VOICEVOX is up")
+            return
+    raise RuntimeError(f"VOICEVOX did not start within {wait_sec}s ({base_url})")
+
+
+# ---------------------------------------------------------------------------
 # Phase executors
 # ---------------------------------------------------------------------------
 
@@ -103,6 +154,7 @@ def run_slides(date_str: str, config_path: Path, state: dict) -> dict:
 
 def run_video(date_str: str, config_path: Path, state: dict) -> dict:
     from video_builder import build_video
+    ensure_voicevox(config_path)
     video_path = build_video(date_str, config_path)
     state["video_path"] = str(video_path)
     state["phases"]["video"] = "done"
@@ -133,11 +185,23 @@ def _per_topic_enabled(config_path: Path) -> bool:
 
 
 def run_video_shorts(date_str: str, config_path: Path, state: dict) -> dict:
+    ensure_voicevox(config_path)
     if _per_topic_enabled(config_path):
         # 「1ニュース=1本」モード: トップN記事それぞれを独立したShortsに
         from video_builder import build_topic_shorts
         video_paths = build_topic_shorts(date_str, config_path)
         state["video_shorts_paths"] = [str(p) for p in video_paths]
+        # 確認用まとめ（題名・要点・セリフ・元記事・事実確認・チェック結果）を1ファイルに
+        try:
+            from review_report import build_review
+            review_path, checks = build_review(date_str, config_path, state.get("topic", ""))
+            state["review_path"] = str(review_path)
+            state["preflight"] = {lv: sum(1 for c in checks if c["level"] == lv)
+                                  for lv in ("FAIL", "WARN")}
+            logger.info("Review: %s (FAIL %d / WARN %d)", review_path,
+                        state["preflight"]["FAIL"], state["preflight"]["WARN"])
+        except Exception as e:
+            logger.warning("Review report failed (continuing): %s", e)
     else:
         from video_builder import build_video
         video_path = build_video(date_str, config_path, shorts=True)
@@ -148,6 +212,13 @@ def run_video_shorts(date_str: str, config_path: Path, state: dict) -> dict:
 
 def run_upload_shorts(date_str: str, config_path: Path, state: dict, script_type: str, topic: str = "") -> dict:
     if _per_topic_enabled(config_path):
+        # プリフライト: 題名の読みがな残り・動画欠落・3分超などがあればアップロードしない
+        from review_report import preflight
+        fails = [c for c in preflight(date_str, load_config(config_path), topic=topic)
+                 if c["level"] == "FAIL"]
+        if fails:
+            raise RuntimeError("Preflight FAIL — upload aborted: " + " / ".join(
+                f"topic{c['topic']} {c['check']} {c['detail']}".strip() for c in fails))
         from youtube_uploader import upload_topic_shorts
         video_urls = upload_topic_shorts(date_str, config_path, topic=topic)
         state["video_shorts_urls"] = video_urls

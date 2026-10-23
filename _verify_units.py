@@ -639,6 +639,203 @@ check("hook_title: 壊れた括弧混入でも見出しが激減しない（1500
 _lead = _fallback_hook_title("「開き括弧だけがずっと続いていて閉じない場合のタイトルはどうなるかを確認するテスト")
 check("hook_title: 先頭未閉じ括弧でも空にならない", bool(_lead), f"got={_lead!r}")
 
+# --- 14. ビルド改善（2026-10-23: 部分修正・題名の読み除去・事実確認・プリフライト・修正反映） ----
+import json as _json
+import tempfile as _tempfile
+
+from script_generator import (
+    FACTCHECK_SYSTEM_PROMPT, SCRIPT_SYSTEM_PROMPT_TEMPLATE as _SPT, _article_issues, _is_format_only,
+    _merge_repair, _repair_script, factcheck_and_fix, normalize_hook_titles, strip_reading_parens,
+)
+from cleaning import cleaning_short
+
+# 14-1. 題名の読みがな除去（Claude(クロード) が YouTube 題名に出た事故の再発防止）
+check("読み除去: 英語の読み", strip_reading_parens("Claude(クロード)が500万行") == "Claudeが500万行")
+check("読み除去: 全角カッコ・漢字の読み", strip_reading_parens("脳（のう）を解析") == "脳を解析")
+check("読み除去: 読み以外のカッコは残す", strip_reading_parens("GPT-5(新版)が登場") == "GPT-5(新版)が登場")
+_sd = {"articles": [{"hook_title": "Claude(クロード)が隠れた弱点493件を発見"}]}
+normalize_hook_titles(_sd, [{"title_ja": "x"}])
+check("normalize_hook_titles: 読みを外す", _sd["articles"][0]["hook_title"] == "Claudeが隠れた弱点493件を発見")
+_ok14 = {"hook_title": "新AIが19項目中14項目で首位に", "intro": "あ" * 50, "explanation": "い" * 90,
+         "insight": "う" * 30, "points": ["要点その一", "要点その二", "要点その三"]}
+check("検証: 題名の読みは指摘対象", any("読みがな" in x for x in
+      _article_issues(1, dict(_ok14, hook_title="Claude(クロード)が隠れた弱点493件を発見"))))
+check("検証: 題名の長さは読み抜きで数える",
+      not any("長すぎ" in x for x in _article_issues(1, dict(_ok14, hook_title="Anthropic(アンスロピック)が新AIを公開しました"))))
+check("検証: 要点2個は指摘対象", any("points" in x for x in _article_issues(1, dict(_ok14, points=["a1", "b2"]))))
+
+# 14-2. 部分修正: 問題のない記事は変えず、悪化する修正は採用しない
+_res = {"articles": [dict(_ok14), dict(_ok14, intro="え" * 120)], "ending": "お" * 50}
+_n = _merge_repair(_res, {"articles": [
+    {"index": 1, "intro": "か" * 200},             # 問題のない記事を悪化させる修正 → 不採用
+    {"index": 2, "intro": "き" * 60},              # 問題を直す修正 → 採用
+    {"index": 9, "intro": "x"},                    # 範囲外 → 無視
+]})
+check("部分修正: 改善だけ採用", _n == 1 and _res["articles"][0]["intro"] == "あ" * 50
+      and _res["articles"][1]["intro"] == "き" * 60, repr(_n))
+
+
+class _FakeLLM:
+    """呼ばれた順に用意した応答を返すモック（呼び出し内容も記録する）."""
+
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def generate(self, system, prompt, max_tokens, temperature=None):
+        self.calls.append({"system": system, "prompt": prompt, "temperature": temperature})
+        r = self.responses.pop(0)
+        if isinstance(r, Exception):
+            raise r
+        return r if isinstance(r, str) else _json.dumps(r, ensure_ascii=False)
+
+
+_res = {"articles": [dict(_ok14), dict(_ok14, intro="え" * 120)], "ending": "お" * 50}
+_fake = _FakeLLM([{"articles": [{"index": 2, "intro": "き" * 60}]}])
+_repair_script(_fake, "SYS", _res, [{"title_ja": "t1"}, {"title_ja": "t2"}], 1000, 3)
+check("部分修正ループ: 問題の記事だけ送り、直ったら止まる",
+      len(_fake.calls) == 1 and "ニュース2" in _fake.calls[0]["prompt"]
+      and "ニュース1:" not in _fake.calls[0]["prompt"] and _res["articles"][1]["intro"] == "き" * 60)
+
+# 14-3. 事実確認: 誤りは自動修正→再確認、細部・形式の指摘は捨てる、ルール外の修正は書き直させる
+_src = [{"title_ja": "脳データ分析", "summary_ja_long": "マウスの脳細胞データを32分で分析。人間なら数カ月から1年。",
+         "facts": ["数千体のAI"]}]
+_sd = {"articles": [dict(_ok14, hook_title="数千のAIが脳を32分で解析",
+                         intro="OpenAI(オープンエーアイ)の研究で、人間なら1年かかる分析が32分で終わったんだ！")]}
+_fake = _FakeLLM([
+    {"articles": [{"index": 1, "issues": [
+        {"field": "hook_title", "severity": "error", "problem": "マウスの脳細胞データ",
+         "fix": "数千のAIがマウスの脳細胞データを32分で分析した研究結果"},  # 30字: ルール外 → 書き直し
+        {"field": "intro", "severity": "error", "problem": "数カ月から1年",
+         "fix": "OpenAIの研究で、人間なら数カ月から1年かかる分析が32分で終わったんだ！"},
+        {"field": "intro", "severity": "error", "problem": "2件目（元の文から作った修正）", "fix": "上書きしてはいけない文です。"},
+        {"field": "insight", "severity": "minor", "problem": "細部", "fix": "細部の修正"},
+        {"field": "points", "problem": "pointsが2個しかない。ルールでは3個", "fix": ""},
+    ]}]},
+    {"fixes": [{"no": 1, "fix": "数千のAIがマウス脳データを32分で分析"}]},
+    {"articles": [{"index": 1, "issues": []}]},
+])
+_rep = factcheck_and_fix(_sd, _src, {"provider": "claude"}, client=_fake)
+_a = _sd["articles"][0]
+check("事実確認: ルール外の題名は書き直して適用", _a["hook_title"] == "数千のAIがマウス脳データを32分で分析", _a["hook_title"])
+check("事実確認: セリフ修正に英語の読みを引き継ぐ", "OpenAI(オープンエーアイ)" in _a["intro"] and "数カ月" in _a["intro"], _a["intro"])
+check("事実確認: 同じ項目の2件目は適用しない", "上書き" not in _a["intro"])
+check("事実確認: minor は直さない", _a["insight"] == "う" * 30)
+check("事実確認: 形式だけの指摘は捨てる", _rep["status"] == "fixed" and not _rep["articles"][0]["unresolved"], repr(_rep))
+check("事実確認: 確認役は温度0・クリーニング入り",
+      all(c["temperature"] == 0 for c in _fake.calls) and cleaning_short() in _fake.calls[0]["system"])
+check("事実確認: 修正後に再確認する（3回目の呼び出しは修正後の台本）",
+      len(_fake.calls) == 3 and "マウス脳データ" in _fake.calls[2]["prompt"])
+check("形式だけの指摘の判定", _is_format_only({"problem": "pointsが2個しかない", "fix": ""})
+      and not _is_format_only({"problem": "数字が元記事と違う", "fix": ""}))
+
+_sd = {"articles": [dict(_ok14)]}
+_rep = factcheck_and_fix(_sd, _src, {"provider": "claude"}, client=_FakeLLM([RuntimeError("down")]))
+check("事実確認: 失敗しても台本は残し status=error", _rep["status"] == "error" and _sd["articles"][0] == _ok14)
+_sd = {"articles": [dict(_ok14, intro="人間なら1年かかる分析が32分で終わったんだ！すごいね。")]}
+_rep = factcheck_and_fix(_sd, _src, {"provider": "claude"}, client=_FakeLLM([
+    {"articles": [{"index": 1, "issues": [{"field": "intro", "severity": "error", "problem": "p",
+                                            "fix": "人間なら数カ月から1年かかる分析が32分で終わったんだ！"}]}]},
+    "壊れた応答", "まだ壊れた応答"]))
+check("事実確認: 再確認だけ失敗→修正は残し要確認",
+      "数カ月" in _sd["articles"][0]["intro"] and _rep["status"] == "unresolved", repr(_rep))
+_sd = {"articles": [dict(_ok14, intro="人間なら1年かかる分析が32分で終わったんだ！")]}
+_rep = factcheck_and_fix(_sd, _src, {"provider": "claude"}, client=_FakeLLM([
+    {"articles": [{"index": 1, "issues": [{"field": "intro", "severity": "error", "problem": "p", "fix": ""}]}]}]))
+check("事実確認: 修正案のない誤りは要確認に残す",
+      _rep["status"] == "unresolved" and _rep["articles"][0]["unresolved"][0]["field"] == "intro")
+check("プロンプト: 台本役・確認役にクリーニングの差し込み口",
+      "{cleaning}" in _SPT and "__CLEANING__" in FACTCHECK_SYSTEM_PROMPT)
+check("プロンプト: 題名に読みを付けない規則", "読みがなのカッコ書きを付けない" in _SPT)
+
+# 14-4. プリフライト・確認用まとめ・修正反映
+from review_report import preflight, render_review, unsupported_numbers
+from review_apply import FixError, plan_fixes
+
+check("数字照合: 元記事にない数字を拾う",
+      unsupported_numbers({"summary_ja_long": "500万行のコードから493件"}, ["500万行で439件", "3個"]) == ["439"])
+check("数字照合: 全角・カンマ・小数", unsupported_numbers(
+    {"facts": ["精度は83.5%、1,200件"]}, ["８３.５%で1200件"]) == [])
+
+with _tempfile.TemporaryDirectory() as _td:
+    _td = Path(_td)
+    (_td / "state" / "captions").mkdir(parents=True)
+    (_td / "output").mkdir()
+    _cfg = {"paths": {"state_dir": str(_td / "state"), "output_dir": str(_td / "output")},
+            "shorts": {"topics_per_day": 2, "max_topic_duration_sec": 75},
+            "youtube": {}, "channel": {}}
+    (_td / "state" / "news_20990101.json").write_text(_json.dumps({"articles": [
+        {"title_ja": "記事1", "summary_ja_long": "OpenAIが32分で分析", "link": "https://e/1"},
+        {"title_ja": "記事2", "summary_ja_long": "Claudeが493件を発見", "link": "https://e/2"},
+    ]}, ensure_ascii=False), encoding="utf-8")
+    (_td / "state" / "script_meta_20990101.json").write_text(_json.dumps({
+        "source": "llm", "factcheck": {"status": "fixed", "articles": [
+            {"index": 1, "fixed": [], "unresolved": []},
+            {"index": 2, "fixed": [], "unresolved": [{"field": "intro", "problem": "要確認の例", "suggestion": ""}]}]},
+        "articles": [
+            {"hook_title": "OpenAIのAIが脳データを32分で解析", "points": ["a1", "b2", "c3"]},
+            {"hook_title": "Claude(クロード)が隠れた弱点を発見", "points": ["a1"]},
+        ]}, ensure_ascii=False), encoding="utf-8")
+    _checks = preflight("20990101", _cfg)
+    _fails = {(c["topic"], c["check"]) for c in _checks if c["level"] == "FAIL"}
+    _warns = {(c["topic"], c["check"]) for c in _checks if c["level"] == "WARN"}
+    check("プリフライト: 動画なしはFAIL", (1, "動画がない") in _fails and (2, "動画がない") in _fails)
+    check("プリフライト: 題名の読みはFAIL", (2, "題名に読みがなのカッコ書き") in _fails, repr(_fails))
+    check("プリフライト: 要点不足・字幕なし・未解決の事実確認はWARN",
+          (2, "画面の要点が3個でない") in _warns and (1, "字幕ファイルがない") in _warns
+          and (2, "事実確認の未解決（intro）") in _warns, repr(_warns))
+    _md = render_review("20990101", [], _checks, {"source": "llm", "factcheck": {"status": "fixed"}})
+    check("確認用まとめ: FAIL件数を見出しに出す", "FAIL " in _md and "事実確認: **fixed**" in _md)
+
+with _tempfile.TemporaryDirectory() as _td:
+    _td = Path(_td)
+    (_td / "state").mkdir()
+    (_td / "output").mkdir()
+    _cfg = {"paths": {"state_dir": str(_td / "state"), "output_dir": str(_td / "output")},
+            "shorts": {"topics_per_day": 3}, "youtube": {}, "channel": {}}
+    (_td / "state" / "news_20990102.json").write_text(_json.dumps({"articles": [
+        {"title_ja": "記事1", "summary_ja_long": "s", "link": "https://e/1"}]}), encoding="utf-8")
+    (_td / "state" / "script_meta_20990102.json").write_text(_json.dumps({
+        "source": "llm", "factcheck": {"status": "ok", "articles": []},
+        "articles": [{"hook_title": "ニュースが1本だけの日の題名です", "points": ["a1", "b2", "c3"]}]}),
+        encoding="utf-8")
+    _c2 = preflight("20990102", _cfg)
+    check("プリフライト: ニュースが3本未満の日は無い本数を FAIL にしない",
+          not any(c["topic"] >= 2 for c in _c2), repr(_c2))
+
+_meta = {"articles": [{"hook_title": "旧題名その一です", "points": ["a"]}, {"hook_title": "旧題名その二です"}],
+         "factcheck": {"status": "unresolved", "articles": [
+             {"index": 1, "fixed": [], "unresolved": [{"field": "hook_title", "problem": "p"}]}]}}
+_md0 = "**セリフ**: 「人間(にんげん)なら1年かかる」\n**セリフ**: 「別の文」"
+_new_md, _new_meta, _chg = plan_fixes({
+    "titles": {"1": "Claude(クロード)が隠れた弱点493件を発見"},
+    "points": {"2": ["要点その一", "要点その二", "要点その三"]},
+    "serif": [{"old": "人間(にんげん)なら1年かかる", "new": "人間なら数カ月から1年かかる"}],
+}, _md0, _meta)
+check("修正反映: 題名の読みを外す", _new_meta["articles"][0]["hook_title"] == "Claudeが隠れた弱点493件を発見")
+check("修正反映: 要点を置き換え", _new_meta["articles"][1]["points"] == ["要点その一", "要点その二", "要点その三"])
+check("修正反映: セリフ置換＋ルビ自動付与", "数(すう)カ月" in _new_md and "1年" in _new_md and "別の文" in _new_md, _new_md)
+check("修正反映: 元データは変えない", _meta["articles"][0]["hook_title"] == "旧題名その一です")
+check("修正反映: 人が直した題名の要確認は解消",
+      _new_meta["factcheck"]["status"] == "fixed" and not _new_meta["factcheck"]["articles"][0]["unresolved"])
+_md_r, _, _ = plan_fixes({"serif": [{"old": "別の文", "new": "脳(ずのう)データ"}]}, _md0, _meta)
+check("修正反映: 書かれたルビ（読みの手直し）は尊重する", "脳(ずのう)データ" in _md_r, _md_r)
+for _bad, _why in [
+    ({"serif": [{"old": 123, "new": "x"}]}, "文字列"),
+    ({"serif": [{"old": "存在しない文", "new": "x"}]}, "old が台本に0回"),
+    ({"titles": {"5": "範囲外の記事番号の題名です"}}, "範囲外"),
+    ({"titles": {"1": "あ" * 30}}, "1〜26字"),
+    ({"points": {"1": ["あ" * 25]}}, "要点"),
+    ({"title": {"1": "キー名の誤り"}}, "未知のキー"),
+    ({"serif": {"old": "x", "new": "y"}}, "配列"),
+    (["not", "a", "dict"], "JSONオブジェクト"),
+]:
+    try:
+        plan_fixes(_bad, _md0, _meta)
+        check(f"修正反映: 不正を拒否（{_why}）", False)
+    except FixError as _e:
+        check(f"修正反映: 不正を拒否（{_why}）", _why in str(_e), str(_e))
+
 print()
 if failures:
     print(f"=== {len(failures)} FAILURES: {failures}")

@@ -104,6 +104,11 @@ def resolve_gemini_api_key(config: dict | None = None) -> str:
 # Unified LLM client
 # ---------------------------------------------------------------------------
 
+# temperature を受け付ける Claude モデル（Opus/Sonnet 4.7 以降・Haiku 5.5 以降は非対応）
+_SAMPLING_MODELS = ("claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-6",
+                    "claude-sonnet-4-5", "claude-opus-4-5")
+
+
 class LLMClient:
     """Unified LLM client supporting Gemini and Claude."""
 
@@ -118,12 +123,16 @@ class LLMClient:
         system_prompt: str,
         user_prompt: str,
         max_tokens: int = 500,
+        temperature: float | None = None,
     ) -> str:
-        """Generate text using the configured LLM provider."""
+        """Generate text using the configured LLM provider.
+
+        temperature: None ならプロバイダ既定。確認役など判断を安定させたい用途は 0 を渡す。
+        """
         if self.provider == "gemini":
-            return self._generate_gemini(system_prompt, user_prompt, max_tokens)
+            return self._generate_gemini(system_prompt, user_prompt, max_tokens, temperature)
         elif self.provider == "claude":
-            return self._generate_claude(system_prompt, user_prompt, max_tokens)
+            return self._generate_claude(system_prompt, user_prompt, max_tokens, temperature)
         else:
             raise ValueError(f"Unknown LLM provider: {self.provider}")
 
@@ -132,6 +141,7 @@ class LLMClient:
         system_prompt: str,
         user_prompt: str,
         max_tokens: int,
+        temperature: float | None = None,
     ) -> str:
         from google import genai
 
@@ -144,7 +154,7 @@ class LLMClient:
         config_kwargs = {
             "system_instruction": system_prompt,
             "max_output_tokens": max_tokens,
-            "temperature": 0.7,
+            "temperature": 0.7 if temperature is None else temperature,
             "response_mime_type": "application/json",
         }
         # Disable thinking for 2.5+ models to save tokens
@@ -165,6 +175,7 @@ class LLMClient:
         system_prompt: str,
         user_prompt: str,
         max_tokens: int,
+        temperature: float | None = None,
     ) -> str:
         import anthropic
 
@@ -187,9 +198,15 @@ class LLMClient:
         else:
             client = anthropic.Anthropic(api_key=token)
 
+        # anthropic SDK 1.x は temperature 引数を削除済み。受け付ける旧世代モデル
+        # （Haiku 4.5 / 4.6系など）のときだけ extra_body で渡す（新世代は非既定値で400）
+        extra = {}
+        if temperature is not None and model.startswith(_SAMPLING_MODELS):
+            extra["extra_body"] = {"temperature": temperature}
         response = client.messages.create(
             model=model,
             max_tokens=max_tokens,
+            **extra,
             system=[
                 {
                     "type": "text",

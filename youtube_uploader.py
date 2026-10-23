@@ -306,6 +306,11 @@ def generate_shorts_metadata(
     }
 
 
+# 読みがなのカッコ書き（script_generator.strip_reading_parens と同じ規則。
+# こちらは形態素解析等の重い依存を持ち込まないよう正規表現だけ持つ）
+_READING_PARENS_RE = re.compile(r"[(（][ぁ-んァ-ヶー・ ]+[)）]")
+
+
 def generate_topic_shorts_metadata(
     date_str: str,
     config: dict,
@@ -325,7 +330,8 @@ def generate_topic_shorts_metadata(
     yt_cfg = config.get("youtube", {})
     topic_label = topic if topic else "AI"
 
-    hook = (hook_title or "").strip() or _short_title_label(
+    # 読みがなのカッコ書き（Claude(クロード)等）は題名・概要欄に出さない（二重の防止）
+    hook = _READING_PARENS_RE.sub("", hook_title or "").strip() or _short_title_label(
         article.get("title_ja", article.get("title", "")), max_chars=24)
 
     # 記事から検索されやすいエンティティ（製品・企業名）を抽出
