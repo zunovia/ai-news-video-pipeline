@@ -757,6 +757,59 @@ check("数字照合: 元記事にない数字を拾う",
 check("数字照合: 全角・カンマ・小数", unsupported_numbers(
     {"facts": ["精度は83.5%、1,200件"]}, ["８３.５%で1200件"]) == [])
 
+# 14-4b. 金額の桁ずれ（2026-11-01: $740 billion を「740億ドル」と10倍小さく訳した）
+from decimal import Decimal as _D
+from money_units import (english_amounts, fix_money_units, ja_amount_text,
+                         suspicious_amounts)
+_en = ("Big Tech plans to spend more than $740 billion this year. Alphabet reported negative "
+       "free cash flow of $9.1 billion. Amazon expects $220 billion in capex. "
+       "It raised $500 million. A $1.2 trillion market. Revenue hit 42.4 billion dollars.")
+check("金額: 英語の $X billion/million/trillion を読む",
+      [u for _, u in english_amounts(_en)] == [_D("7.4e11"), _D("9.1e9"), _D("2.2e11"),
+                                               _D("5e8"), _D("1.2e12"), _D("4.24e10")])
+check("金額: 日本語表記", [ja_amount_text(_D(x)) for x in ("7.4e11", "9.1e9", "5e8", "1.2e12", "2e12", "1.8e6")]
+      == ["7400億", "91億", "5億", "1兆2000億", "2兆", "180万"])
+_txt, _chg = fix_money_units("4社で740億ドル以上！アルファベットは91億ドル、５００万ドルを調達", _en)
+check("金額: 10倍・100倍の誤訳だけ直し、正しい金額と全角記号は残す",
+      _txt == "4社で7400億ドル以上！アルファベットは91億ドル、5億ドルを調達" and len(_chg) == 2, _txt)
+check("金額: trillion の誤訳も直す", fix_money_units("1.2億ドル市場", _en)[0] == "1兆2000億ドル市場")
+check("金額: 英語原文にない金額・円は触らない",
+      fix_money_units("300億ドルと740億円", _en) == ("300億ドルと740億円", []))
+check("金額: 英語原文に同じ金額があれば直さない（$74 billion と $740 billion が両方ある）",
+      fix_money_units("740億ドル", "$74 billion and $740 billion")[1] == []
+      and fix_money_units("74億ドル", "$7.4 billion and $74 billion")[1] == [])
+for _src_fp in ("USD 500 million round; total valuation $5 billion",
+                "raised $500 mln; valuation $5 billion",
+                "raised $500-million; valuation $5 billion",
+                "raised $500,000,000; valuation $5 billion",
+                "raised 500M euros-equivalent; valuation $5 billion"):
+    check(f"金額: 正しい訳を壊さない（{_src_fp[:28]}…）",
+          fix_money_units("5億ドルを調達", _src_fp) == ("5億ドルを調達", []))
+check("金額: USD・mln・ハイフン表記の金額も直す候補にする",
+      [u for _, u in english_amounts("USD 500 mln, $3-billion, US$2bn, $7B")]
+      == [_D("5e8"), _D("3e9"), _D("2e9"), _D("7e9")])
+check("金額: $74 billion を「74億ドル」と書いたら直す",
+      fix_money_units("74億ドル", "$74 billion and $740 billion")[0] == "740億ドル")
+check("金額: 原文が日本語（英語の金額なし）なら何もしない",
+      fix_money_units("740億ドル", "GIGAZINEの記事本文") == ("740億ドル", []))
+check("金額: セリフの読みがな越しに桁ずれを見つける",
+      suspicious_amounts(["4社(しゃ)が740億(おく)ドル以上", "91億(おく)ドル"], _en)
+      == ["740億ドル → 7400億ドル"])
+check("数字照合: 英語原文の金額を正しく換算した数字は WARN にしない",
+      unsupported_numbers({"summary_ja_long": "4社で740億ドル", "full_text": _en},
+                          ["4社で7400億ドル"]) == [])
+from news_collector import ENRICH_SYSTEM_PROMPT_TEMPLATE as _EPT, _fix_money_in_article
+_art = {"title": "Cracks in AI spending", "title_ja": "740億ドルのAI投資",
+        "summary_ja_long": "4社が740億ドル", "facts": ["アマゾンは220億ドル", "12%下落"]}
+_fix_money_in_article(_art, _en)
+check("要約: 題名・要約・事実の桁ずれを直して記録する",
+      _art["title_ja"] == "7400億ドルのAI投資" and _art["summary_ja_long"] == "4社が7400億ドル"
+      and _art["facts"] == ["アマゾンは2200億ドル", "12%下落"]
+      and len(_art["money_unit_fixes"]) == 2, repr(_art))
+check("プロンプト: 要約役に billion 換算と「赤字」の規則",
+      "$740 billion = 7400億ドル" in _EPT and "赤字" in _EPT)
+check("プロンプト: 確認役に会計用語の取り違えの規則", "会計用語の取り違え" in FACTCHECK_SYSTEM_PROMPT)
+
 with _tempfile.TemporaryDirectory() as _td:
     _td = Path(_td)
     (_td / "state" / "captions").mkdir(parents=True)

@@ -692,10 +692,41 @@ ENRICH_SYSTEM_PROMPT_TEMPLATE = """\
 - facts: 台本のたとえ話や具体例に使える、記事中の具体的な事実・数字・できごとを2〜3個。
 - kid_angle: このニュースが視聴者（専門知識のない大人）の生活・仕事・お金に
   どう関係するかの一言（50文字以内）。※フィールド名は互換性のためkid_angleのまま。
+- 金額の換算に注意（桁を間違えやすい）: 1 billion = 10億、1 million = 100万、1 trillion = 1兆。
+  例: $740 billion = 7400億ドル、$9.1 billion = 91億ドル、$500 million = 5億ドル、
+  $1.2 trillion = 1兆2000億ドル。「$740 billion」を「740億ドル」と書かない。
+- 会計用語を言い換えない: negative free cash flow（フリーキャッシュフローのマイナス＝資金の持ち出し）や
+  spending（支出）を「赤字」と書かない。「赤字」は net loss / operating loss のときだけ使う。
 
 JSON形式のみで回答（説明文不要）:
 {{"summary_ja_long": "...", "facts": ["...", "..."], "kid_angle": "..."}}
 """
+
+
+def _fix_money_in_article(article: dict, body: str) -> None:
+    """要約・事実・題名の「◯億ドル」の桁ずれを英語原文に合わせて直す（2026-11-01 の 10倍誤訳対策）.
+
+    直した内容は article["money_unit_fixes"] に残し、確認用まとめ（review）に出す。
+    """
+    from money_units import fix_money_units
+
+    source = f"{article.get('title', '')}\n{body}"
+    fixes: list[str] = []
+    for key in ("title_ja", "summary_ja", "summary_ja_long"):
+        if article.get(key):
+            article[key], changes = fix_money_units(article[key], source)
+            fixes += changes
+    if article.get("facts"):
+        new_facts = []
+        for f in article["facts"]:
+            fixed, changes = fix_money_units(f, source)
+            new_facts.append(fixed)
+            fixes += changes
+        article["facts"] = new_facts
+    if fixes:
+        article["money_unit_fixes"] = list(dict.fromkeys(fixes))
+        logger.warning("  Money unit fixed (英語原文と桁ずれ): %s — %s",
+                       article.get("title_ja", "")[:40], "、".join(article["money_unit_fixes"]))
 
 
 def summarize_articles_with_llm(
@@ -748,6 +779,7 @@ def summarize_articles_with_llm(
         except Exception:
             logger.warning("Article enrich failed (using short summary): %s",
                            article.get("title_ja", "")[:50], exc_info=False)
+        _fix_money_in_article(article, body)
 
 
 # ---------------------------------------------------------------------------

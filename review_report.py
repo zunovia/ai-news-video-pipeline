@@ -56,12 +56,19 @@ def unsupported_numbers(article: dict, texts: list[str]) -> list[str]:
         " ".join(str(f) for f in article.get("facts") or []),
     ])
     known = _numbers(source)
+    # 英語原文の金額（$740 billion → 7400億）は正しい換算なので元記事にある数字として扱う
+    from money_units import english_amount_numbers
+    known |= english_amount_numbers(_english_source(article))
     found: list[str] = []
     for t in texts:
         for num in sorted(_numbers(t)):
             if num not in known and num not in found:
                 found.append(num)
     return found
+
+
+def _english_source(article: dict) -> str:
+    return f"{article.get('title', '')}\n{article.get('full_text', '')}"
 
 
 def _load_json(path: Path) -> dict:
@@ -179,6 +186,11 @@ def preflight(date_str: str, config: dict, topics: list[dict] | None = None,
             nums = unsupported_numbers(t["article"], [hook, *t["points"], *t["serifs"]])
             if nums:
                 add("WARN", i, "元記事にない数字", "、".join(nums))
+            from money_units import suspicious_amounts
+            money = suspicious_amounts([hook, *t["points"], *t["serifs"]],
+                                       _english_source(t["article"]))
+            if money:
+                add("WARN", i, "金額の桁ずれの疑い（英語原文と比較）", "、".join(money))
         fca = t["factcheck"]
         if fca and fca.get("unresolved"):
             for u in fca["unresolved"]:
@@ -230,6 +242,8 @@ def render_review(date_str: str, topics: list[dict], checks: list[dict], meta: d
         lines += ["", "**元記事の要約・事実**", "",
                   a.get("summary_ja_long") or a.get("summary_ja", "")]
         lines += [f"- {f}" for f in (a.get("facts") or [])]
+        if a.get("money_unit_fixes"):
+            lines.append(f"- （金額の桁を英語原文に合わせて自動修正: {'、'.join(a['money_unit_fixes'])}）")
         fca = t["factcheck"]
         lines += ["", "**事実確認**", ""]
         if not fca:
