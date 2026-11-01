@@ -1,0 +1,20 @@
+/* 週替わりテーマの足場（提案段階。本番テンプレ/configには未接続）。
+   骨格HTMLは固定し、見た目の可変部分は下記の「--t-*」変数だけを週ごとに上書きする。
+   曜日の色（.day-mon〜.day-sun の --day-grad-start/--day-grad-end/--day-accent）は全テーマ共通で
+   テンプレ側が持ち、テーマからは上書きしない。
+   週替わり候補（1週につき1変数だけ変える＝「週1・1変数の実験」原則）:
+     --t-radius        カード角丸        (例 8px / 24px / 44px)
+     --t-card-border   カード枠          (例 0 / 3px solid color-mix(...))
+     --t-accent-shape  アクセント形状    (番号バッジ角丸: 50% / 8px / 0)
+     --t-bg-pattern    背景パターン      (dots / grid / none。値は background-image 断片)
+     --t-hook-deco     見出しの装飾      (marker / underline / bar)
+     --t-ponte-pos     ポンテの位置      (字幕帯の左 / 画面右上 など。1変数で left/right を切替)
+     --t-shadow        影の強さ          (0 8px 24px rgba(...))
+   文字サイズ・安全領域（字幕帯 y=1160〜1480）に関わる値はテーマに出さない。 */
+:root {
+  --t-radius: 24px;
+  --t-card-border: 3px solid color-mix(in srgb, var(--accent, #1976d2) 16%, transparent);
+  --t-accent-shape: 50%;
+  --t-bg-pattern: radial-gradient(color-mix(in srgb, var(--day-accent, #1976d2) 9%, transparent) 2.4px, transparent 2.4px);
+  --t-shadow: 0 8px 24px rgba(29,39,51,.10);
+}

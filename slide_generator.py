@@ -398,10 +398,12 @@ async def generate_slides_async(
     template_override: Path | None = None,
     out_subdir: str | None = None,
     news_json_override: Path | None = None,
+    meta_json_override: Path | None = None,
 ) -> Path:
     """Generate all slide images from a script. Returns images directory.
 
     template_override / out_subdir は UI プレビュー用の後方互換オプション（未指定時は従来動作）。
+    meta_json_override は UI プレビュー用（state/old の script_meta を使う）。未指定なら従来どおり。
     news_json_override は本番でも使う: orchestrator が collect の保存先（カスタムトピックは
     news_{date}_{slug}.json）を渡す。未指定なら従来どおり news_{date}.json を読む。
     """
@@ -488,7 +490,7 @@ async def generate_slides_async(
     # script_meta: フック見出し・要点（1始まりの記事番号キー。news JSON と同じ並び）
     hook_titles: dict[int, str] = {}
     article_points: dict[int, list[str]] = {}
-    meta_path = state_dir / f"script_meta_{date_key}.json"
+    meta_path = meta_json_override or (state_dir / f"script_meta_{date_key}.json")
     if meta_path.exists():
         import json as _json
         try:

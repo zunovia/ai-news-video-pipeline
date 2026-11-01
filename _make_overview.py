@@ -40,13 +40,37 @@ L16 = {
     13: "13 キーワード", 14: "14 エンディング",
 }
 
-items16 = [(PRE / f"slide_{n}.png", L16[n]) for n in range(1, 15) if (PRE / f"slide_{n}.png").exists()]
-items16.append((PRE / "thumbnail_20260630.jpg", "★ サムネイル"))
-grid(items16, cols=3, cw=520, ch=293, title="教室・ノート風 ｜ 通常版16:9 一覧（6/30データ）").save(PRE / "_overview.png")
 
-shorts_nums = sorted(int(p.stem.split("_")[1]) for p in PRES.glob("slide_*.png"))
-itemsS = [(PRES / f"slide_{n}.png", f"{n} {L16.get(n,'').split(' ',1)[-1]}") for n in shorts_nums]
-grid(itemsS, cols=6, cw=190, ch=338, title="教室・ノート風 ｜ Shorts 9:16 一覧（6/30データ）").save(PRES / "_overview.png")
+def legacy_main():
+    items16 = [(PRE / f"slide_{n}.png", L16[n]) for n in range(1, 15) if (PRE / f"slide_{n}.png").exists()]
+    items16.append((PRE / "thumbnail_20260630.jpg", "★ サムネイル"))
+    grid(items16, cols=3, cw=520, ch=293, title="教室・ノート風 ｜ 通常版16:9 一覧（6/30データ）").save(PRE / "_overview.png")
 
-print("overview ->", PRE / "_overview.png")
-print("overview ->", PRES / "_overview.png")
+    shorts_nums = sorted(int(p.stem.split("_")[1]) for p in PRES.glob("slide_*.png"))
+    itemsS = [(PRES / f"slide_{n}.png", f"{n} {L16.get(n,'').split(' ',1)[-1]}") for n in shorts_nums]
+    grid(itemsS, cols=6, cw=190, ch=338, title="教室・ノート風 ｜ Shorts 9:16 一覧（6/30データ）").save(PRES / "_overview.png")
+
+    print("overview ->", PRE / "_overview.png")
+    print("overview ->", PRES / "_overview.png")
+
+
+def dir_overview(d: Path, title: str, cols: int = 6) -> Path:
+    """任意のディレクトリの slide_*.png を一覧にして d/_overview.png に保存する（候補UI比較用）."""
+    nums = sorted(int(p.stem.split("_")[1]) for p in d.glob("slide_*.png"))
+    items = [(d / f"slide_{n}.png", f"slide {n}") for n in nums]
+    out = d / "_overview.png"
+    grid(items, cols=cols, cw=190, ch=338, title=title).save(out)
+    return out
+
+
+if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--dir", default=None, help="指定時はそのディレクトリの一覧だけを作る（従来の state/preview* は触らない）")
+    ap.add_argument("--title", default="Shorts 9:16 一覧")
+    ap.add_argument("--cols", type=int, default=6)
+    a = ap.parse_args()
+    if a.dir:
+        print("overview ->", dir_overview(Path(a.dir), a.title, a.cols))
+    else:
+        legacy_main()

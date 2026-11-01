@@ -26,11 +26,18 @@ def main() -> None:
     ap.add_argument("--date", default=DEF_DATE)
     ap.add_argument("--script", default=DEF_SCRIPT)
     ap.add_argument("--news", default=DEF_NEWS)
+    ap.add_argument("--meta", default=None, help="script_meta JSON（未指定なら state/script_meta_{date}.json）")
+    ap.add_argument("--day", default=None, choices=["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+                    help="曜日クラスを強制する（省略時は --date の曜日）")
     ap.add_argument("--template", required=True)
     ap.add_argument("--shorts", action="store_true")
     ap.add_argument("--thumbnail", action="store_true")
     ap.add_argument("--out", required=True, help="state 配下の出力サブディレクトリ名")
     args = ap.parse_args()
+
+    if args.day:
+        # 曜日の色だけ差し替えて描画する（日付表示・データはそのまま）
+        sg.get_day_class = lambda _d, _c=f"day-{args.day}": _c
 
     if args.thumbnail:
         out_dir = Path("state") / args.out
@@ -52,6 +59,7 @@ def main() -> None:
         template_override=Path(args.template),
         out_subdir=args.out,
         news_json_override=Path(args.news),
+        meta_json_override=Path(args.meta) if args.meta else None,
     ))
     print("slides done ->", "state/" + args.out)
 

@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1080, height=1920">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { width: 1080px; height: 1920px; font-family: 'Noto Sans JP', 'Yu Gothic', 'Meiryo', sans-serif; overflow: hidden; }
+.slide { width: 1080px; height: 1920px; position: relative; display: flex; flex-direction: column; }
+
+.day-mon { --day-grad-start: #1565c0; --day-grad-end: #42a5f5; --day-accent: #1976d2; }
+.day-tue { --day-grad-start: #2e7d32; --day-grad-end: #66bb6a; --day-accent: #388e3c; }
+.day-wed { --day-grad-start: #00695c; --day-grad-end: #4db6ac; --day-accent: #00796b; }
+.day-thu { --day-grad-start: #e65100; --day-grad-end: #ffa726; --day-accent: #ef6c00; }
+.day-fri { --day-grad-start: #c2185b; --day-grad-end: #f06292; --day-accent: #d81b60; }
+.day-sat { --day-grad-start: #6a1b9a; --day-grad-end: #ab47bc; --day-accent: #7b1fa2; }
+.day-sun { --day-grad-start: #c62828; --day-grad-end: #ef5350; --day-accent: #d32f2f; }
+
+.slide {
+  --ink: #1d2733;
+  --paper: #f4f7fb;
+  --card: #ffffff;
+  --accent: var(--day-accent, #1976d2);
+  --accent-soft: color-mix(in srgb, var(--day-accent, #1976d2) 12%, #ffffff);
+  --marker: color-mix(in srgb, var(--day-grad-end, #42a5f5) 28%, #ffe27a);
+}
+
+/* ============ 共通背景（ライト＋日替わりアクセント） ============ */
+.slide--news, .slide--keyword {
+  background-color: var(--paper);
+  background-image:
+    radial-gradient(circle at 8% 4%, color-mix(in srgb, var(--day-grad-start,#1565c0) 16%, transparent), transparent 34%),
+    radial-gradient(circle at 96% 96%, color-mix(in srgb, var(--day-grad-end,#42a5f5) 14%, transparent), transparent 30%),
+    radial-gradient(color-mix(in srgb, var(--day-accent,#1976d2) 9%, transparent) 2.4px, transparent 2.4px);
+  background-size: 100% 100%, 100% 100%, 56px 56px;
+}
+
+/* ============ トップバー ============
+   Shorts上部UI（Shortsロゴ・検索 ~140px）とKen Burnsクロップ（~46px）を避けるため、
+   バーは全面に伸ばしつつ文字は下寄せでセーフゾーン（y≈190以降）に置く */
+.topbar {
+  flex-shrink: 0; height: 250px; display: flex; align-items: flex-end; gap: 24px;
+  padding: 0 48px 26px;
+  background: linear-gradient(100deg, var(--day-grad-start,#1565c0), var(--day-grad-end,#42a5f5));
+  color: #fff; box-shadow: 0 6px 18px rgba(0,0,0,.18);
+}
+.topbar .live-dot { width: 22px; height: 22px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 8px rgba(255,255,255,.25); flex-shrink: 0; }
+.topbar .topbar-title { font-size: 42px; font-weight: 700; letter-spacing: .04em; }
+.topbar .topbar-date { margin-left: auto; font-size: 32px; font-weight: 500; opacity: .95; }
+
+/* ============ OG画像カード ============ */
+.hero {
+  margin: 32px 48px 0; flex-shrink: 0; position: relative;
+  border-radius: 28px; overflow: hidden; background: #e6ebf2;
+  box-shadow: 0 16px 40px rgba(29,39,51,.20);
+}
+.hero .hero-img { width: 100%; height: 460px; object-fit: cover; display: block; }
+.hero .source-chip {
+  position: absolute; right: 20px; bottom: 20px;
+  background: rgba(20,28,38,.82); color: #fff; border-radius: 999px;
+  padding: 10px 28px; font-size: 27px; font-weight: 600; letter-spacing: .02em;
+  backdrop-filter: blur(2px);
+}
+
+/* ============ 本文エリア ============ */
+/* 下420pxはShorts UI（タイトル・ボタン列）＋クロップ帯のため本文を置かない */
+.body-area { flex: 1; min-height: 0; display: flex; flex-direction: column; justify-content: center; gap: 32px; padding: 24px 48px 430px; position: relative; }
+
+/* 見出し（intro側） */
+.headline {
+  font-size: 58px; font-weight: 700; color: var(--ink); line-height: 1.62;
+  display: inline; box-decoration-break: clone; -webkit-box-decoration-break: clone;
+  background: linear-gradient(transparent 68%, var(--marker) 68%, var(--marker) 94%, transparent 94%);
+  padding: 0 6px;
+}
+
+/* ポンテ＋セリフの対話行（コメンテーター配置） */
+.dialog { display: flex; align-items: flex-end; gap: 20px; }
+.dialog .ponte-img { width: 210px; height: auto; flex-shrink: 0; filter: drop-shadow(0 10px 20px rgba(29,39,51,.22)); }
+.dialog .serif-card { flex: 1; min-width: 0; }
+.slide--point .serif-card { font-size: 41px; line-height: 1.68; }
+/* 長文セリフはフォントを段階的に縮めてカードを下部セーフゾーン内に収める */
+.serif-card.serif-long   { font-size: 37px; line-height: 1.62; padding: 36px 40px; }
+.serif-card.serif-xlong  { font-size: 34px; line-height: 1.58; padding: 32px 36px; }
+.serif-card.serif-xxlong { font-size: 30px; line-height: 1.55; padding: 28px 32px; }  /* LLMが文字数規則を逸脱した時の保険 */
+.serif-card { overflow-wrap: anywhere; }
+
+/* ============ ポイントスライド ============
+   intro側と文脈をつなぐ「トピック帯」（サムネ＋見出し）を上に置き、
+   その下にバッジ＋対話を配置して縦の空白をなくす */
+.slide--point .body-area { justify-content: flex-start; padding-top: 40px; gap: 36px; }
+.topic-strip {
+  display: flex; align-items: center; gap: 28px;
+  background: var(--card); border-radius: 26px; padding: 22px 26px;
+  box-shadow: 0 10px 28px rgba(29,39,51,.10);
+}
+.topic-strip .topic-thumb {
+  width: 176px; height: 176px; flex-shrink: 0; border-radius: 20px; object-fit: cover;
+  background: #e6ebf2; display: block;
+}
+.topic-strip .topic-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.topic-strip .topic-kicker {
+  font-size: 24px; font-weight: 700; letter-spacing: .08em; color: var(--accent);
+}
+.topic-strip .topic-title {
+  font-size: 35px; font-weight: 700; color: var(--ink); line-height: 1.5;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.topic-strip .topic-title rt { font-size: 0.38em; }
+
+.point-badge {
+  align-self: flex-start; display: flex; align-items: center; gap: 18px;
+  background: linear-gradient(120deg, var(--day-grad-start,#1565c0), var(--day-grad-end,#42a5f5));
+  color: #fff; border-radius: 999px; padding: 18px 44px;
+  font-size: 48px; font-weight: 700; letter-spacing: .04em;
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--day-accent,#1976d2) 38%, transparent);
+  margin-top: 8px;
+}
+
+/* セリフカード（吹き出し：左のポンテへ尻尾） */
+.serif-card {
+  position: relative; background: var(--card); border-radius: 26px;
+  border-left: 14px solid var(--accent);
+  padding: 42px 46px; font-size: 44px; color: var(--ink); line-height: 1.72;
+  box-shadow: 0 10px 30px rgba(29,39,51,.12);
+}
+.serif-card::before {
+  content: ""; position: absolute; left: -27px; bottom: 60px;
+  border: 14px solid transparent; border-right-color: var(--card);
+  filter: drop-shadow(-4px 4px 4px rgba(29,39,51,.05));
+}
+
+/* フッター（Shorts下部UI: タイトル帯~300px＋右ボタン列を避け、左寄せ・高め配置） */
+.brandline {
+  position: absolute; left: 0; right: 0; bottom: 350px; z-index: 2;
+  display: flex; justify-content: flex-start; padding: 0 52px;
+  font-size: 28px; font-weight: 600; color: color-mix(in srgb, var(--day-accent,#1976d2) 72%, #47566a);
+}
+
+/* ============ 字幕焼き込みモード（shorts.burn_captions=true, 2026-10-04） ============
+   セリフ全文は描かず、動画側（video_builder.burn_topic_captions）が音声同期の
+   ルビ付き字幕を「字幕帯」に重ねる。字幕帯の座標は video_builder の
+   _CAPTION_BOX と一致させること（x=236〜1036, 下端 y=1480）。 */
+.slide--cap .body-area { justify-content: flex-start; gap: 30px; padding: 40px 48px 0; }
+.slide--cap .hook {
+  font-size: 76px; font-weight: 800; color: var(--ink); line-height: 1.5; letter-spacing: .01em;
+  display: inline; box-decoration-break: clone; -webkit-box-decoration-break: clone;
+  background: linear-gradient(transparent 66%, var(--marker) 66%, var(--marker) 93%, transparent 93%);
+  padding: 0 6px;
+}
+.slide--cap .hook rt { font-size: 0.34em; }
+.slide--cap .hook, .point-card .pt, .slide--cap .topic-title, .slide--cap .src-title { word-break: auto-phrase; }
+/* 見出しの下に元記事タイトルを小さく添える（文脈補足＋見出しと字幕帯の間の余白を埋める） */
+.slide--cap .src-title {
+  display: flex; gap: 16px; align-items: flex-start;
+  font-size: 34px; font-weight: 500; line-height: 1.6; color: #5a6878;
+}
+.slide--cap .src-title .src-label {
+  flex-shrink: 0; margin-top: 6px; font-size: 24px; font-weight: 700; letter-spacing: .06em;
+  color: var(--accent); border: 2px solid var(--accent); border-radius: 10px; padding: 2px 12px;
+}
+.slide--cap .src-title .src-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.slide--cap .src-title rt { font-size: 0.42em; }
+
+/* 要点カード（図解） */
+.points { display: flex; flex-direction: column; gap: 20px; }
+.point-card {
+  display: flex; align-items: center; gap: 26px;
+  background: var(--card); border-radius: 24px; padding: 24px 30px;
+  box-shadow: 0 8px 24px rgba(29,39,51,.10);
+  border: 3px solid color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.point-card .num {
+  width: 72px; height: 72px; flex-shrink: 0; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, var(--day-grad-start,#1565c0), var(--day-grad-end,#42a5f5));
+  color: #fff; font-size: 40px; font-weight: 800;
+}
+.point-card .pt { font-size: 46px; font-weight: 700; color: var(--ink); line-height: 1.45; }
+.point-card .pt rt { font-size: 0.36em; }
+.slide--cap.slide--point .hero-small { margin: 0; }
+.slide--cap.slide--point .hero-small .hero-img { height: 520px; }
+
+/* 字幕帯の左に立つポンテ（字幕カードはここへ動画側で重なる） */
+.cap-ponte {
+  position: absolute; left: 36px; bottom: 440px; width: 186px; height: auto; z-index: 3;
+  filter: drop-shadow(0 10px 20px rgba(29,39,51,.22));
+}
+.slide--cap .brandline { bottom: 372px; }
+
+/* ルビ: 読みが親文字より長いときに親文字が字間伸長される（独 占）のを防ぐため
+   center 揃え＋ルビ単位の途中改行を禁止する */
+ruby { ruby-position: over; ruby-align: center; white-space: nowrap; }
+rt { font-size: 0.40em; font-weight: 400; color: inherit; opacity: .92; letter-spacing: 0; }
+
+/* ============ オープニング／エンディング（ダイジェスト用に温存） ============ */
+.slide--opening, .slide--ending {
+  background: linear-gradient(160deg, var(--day-grad-start,#1565c0), var(--day-grad-end,#42a5f5));
+  justify-content: center; align-items: center; text-align: center; padding: 60px; color: #fff;
+}
+.slide--opening .ponte-img-large, .slide--ending .ponte-img-large { width: 380px; height: auto; margin-bottom: 44px; filter: drop-shadow(0 10px 22px rgba(0,0,0,.35)); }
+.slide--opening .channel-name { font-size: 100px; font-weight: 700; margin-bottom: 28px; }
+.slide--opening .tagline { font-size: 46px; opacity: .95; }
+.slide--opening .date-big { font-size: 56px; margin-top: 52px; font-weight: 500; }
+.slide--ending .message { font-size: 92px; font-weight: 700; }
+.slide--ending .sub { font-size: 42px; opacity: .9; margin-top: 26px; }
+
+/* ============ キーワード（ダイジェスト用に温存） ============ */
+.slide--keyword .keyword-header { text-align: center; padding: 190px 48px 30px; font-size: 64px; font-weight: 700; color: var(--ink); }
+.slide--keyword .keyword-body { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 0 60px 430px; gap: 34px; }
+.slide--keyword .keyword-card { background: var(--card); border-radius: 22px; padding: 34px 40px; display: flex; flex-direction: column; gap: 16px; box-shadow: 0 10px 26px rgba(29,39,51,.10); }
+.slide--keyword .keyword-term { align-self: flex-start; font-size: 44px; font-weight: 700; color: #fff; background: linear-gradient(135deg, var(--day-grad-start,#1565c0), var(--day-grad-end,#42a5f5)); border-radius: 14px; padding: 10px 28px; }
+.slide--keyword .keyword-desc { font-size: 38px; color: var(--ink); line-height: 1.6; }
+
+.ponte-placeholder { width: 160px; height: 160px; background: linear-gradient(135deg,#a8edea,#fed6e3); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 80px; }
+
+/* ================================================================
+   候補C「soft」やわらかいイラストカード風（ポンテが主役）
+   字幕焼き込みモード（.slide--cap）専用。見出しフォント: 変更なし。
+   ================================================================ */
+.slide.slide--cap.cand-soft {
+  --ink: #26303d; --muted: #566275;
+  --deep: color-mix(in srgb, var(--day-accent, #1976d2) 80%, #000);
+  --tint: color-mix(in srgb, var(--day-grad-end, #42a5f5) 26%, #ffffff);
+  --tint2: color-mix(in srgb, var(--day-grad-start, #1565c0) 12%, #fffaf2);
+  display: block; background-color: #fffaf2;
+  background-image:
+    radial-gradient(circle at 92% 7%, var(--tint) 0 190px, transparent 191px),
+    radial-gradient(circle at -4% 52%, var(--tint2) 0 260px, transparent 261px),
+    radial-gradient(circle at 104% 70%, var(--tint) 0 150px, transparent 151px),
+    radial-gradient(color-mix(in srgb, var(--day-accent) 14%, transparent) 4px, transparent 4.5px);
+  background-size: 100% 100%, 100% 100%, 100% 100%, 64px 64px;
+}
+.cand-soft .pills { position: absolute; left: 48px; right: 48px; top: 204px; display: flex; align-items: center; gap: 16px; }
+.cand-soft .pill { background: #fff; color: var(--deep); font-size: 36px; font-weight: 800; padding: 10px 34px; border-radius: 999px; box-shadow: 0 8px 22px rgba(60,50,40,.14); border: 4px solid var(--tint); }
+.cand-soft .pill.dt { margin-left: auto; font-size: 30px; font-weight: 700; color: var(--ink); }
+.cand-soft .stack { position: absolute; left: 48px; right: 48px; top: 300px; display: flex; flex-direction: column; }
+.cand-soft .hero { margin: 0 0 30px; border-radius: 56px; border: 10px solid #fff; box-shadow: 0 16px 36px rgba(60,50,40,.18); background: #fff; }
+.cand-soft .hero .hero-img { height: var(--hero-h, 420px); }
+.cand-soft .source-chip { left: 22px; right: auto; bottom: 22px; background: #fff; color: var(--deep); font-size: 26px; font-weight: 800; padding: 8px 26px; backdrop-filter: none; box-shadow: 0 4px 12px rgba(0,0,0,.18); }
+.cand-soft .hook {
+  display: block; color: var(--ink); font-size: var(--hook-fs, 74px); font-weight: 800; line-height: 1.5; padding: 0;
+  background: none;
+}
+.cand-soft .hook-wrap { display: block; max-width: 700px; }
+.cand-soft .src-title { margin-top: 20px; font-size: 30px; font-weight: 500; line-height: 1.55; color: var(--muted); }
+.cand-soft .src-title .src-label { color: var(--deep); border-color: var(--deep); border-radius: 999px; padding: 2px 16px; }
+/* ポイント */
+.cand-soft.slide--point .stack { top: 300px; gap: 26px; }
+.cand-soft .topic-strip { border-radius: 44px; padding: 20px 26px; border: 6px solid var(--tint); box-shadow: 0 12px 28px rgba(60,50,40,.14); }
+.cand-soft .topic-strip .topic-thumb { border-radius: 50%; width: 150px; height: 150px; border: 6px solid var(--tint); }
+.cand-soft .topic-strip .topic-kicker { color: var(--deep); }
+.cand-soft .topic-strip .topic-title { font-size: 34px; }
+.cand-soft .point-badge { align-self: flex-start; margin: 0; background: var(--deep); color: #fff; font-size: 44px; padding: 12px 40px; box-shadow: 0 8px 0 color-mix(in srgb, var(--deep) 55%, #fffaf2); }
+.cand-soft .points { gap: var(--pt-gap, 20px); }
+.cand-soft .point-card { border-radius: 44px; border: 6px solid var(--tint); padding: var(--pt-pad, 22px) 30px; gap: 26px; box-shadow: 0 10px 24px rgba(60,50,40,.12); }
+.cand-soft .point-card .num { width: var(--num-size, 76px); height: var(--num-size, 76px); background: var(--deep); font-size: calc(var(--num-size, 76px) * .55); }
+.cand-soft .point-card .pt { font-size: var(--pt-fs, 50px); color: var(--ink); }
+.cand-soft .hero-small { margin: 0; }
+/* 字幕帯の背景（ポンテ＋字幕を載せる白い島）と、ポンテの後光 */
+.cand-soft .well { position: absolute; left: 20px; right: 20px; top: 1146px; height: 354px; border-radius: 56px; background: rgba(255,255,255,.66); border: 5px solid var(--tint); z-index: 1; }
+.cand-soft .halo { position: absolute; left: 6px; bottom: 424px; width: 226px; height: 226px; border-radius: 50%; background: var(--tint); z-index: 2; }
+.cand-soft .cap-ponte { left: 14px; bottom: 436px; width: 210px; z-index: 3; }
+.cand-soft .brandline { color: var(--deep); font-size: 30px; font-weight: 800; left: 20px; bottom: 372px; }
+</style>
+</head>
+<body>
+
+{% if slide_type == "opening" %}
+<div class="slide slide--opening {{ day_class }}">
+  {% if ponte_image %}<img class="ponte-img-large" src="{{ ponte_image }}" alt="ポンテ">{% endif %}
+  <div class="channel-name">{{ channel_name }}</div>
+  <div class="tagline">{{ tagline }}</div>
+  <div class="date-big">{{ date }}</div>
+</div>
+
+{% elif slide_type == "keyword" %}
+<div class="slide slide--keyword {{ day_class }}">
+  <div class="keyword-header">📖 今日のキーワード</div>
+  <div class="keyword-body">
+    {% for kw in keyword_items %}
+    <div class="keyword-card">
+      <div class="keyword-term">{{ kw.term }}</div>
+      <div class="keyword-desc">{{ kw.desc }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <div class="brandline">{{ channel_name }}</div>
+</div>
+
+{% elif slide_type == "ending" %}
+<div class="slide slide--ending {{ day_class }}">
+  {% if ponte_image %}<img class="ponte-img-large" src="{{ ponte_image }}" alt="ポンテ">{% endif %}
+  <div class="message">{{ ending_message }}</div>
+  <div class="sub">チャンネル登録・いいね、よろしくね！</div>
+</div>
+
+{% elif captions_burned %}
+{# ---- 候補C soft: 字幕焼き込みモード（やわらかいイラストカード風・ポンテが主役） ---- #}
+{% set is_point = "のポイント" in title %}
+<div class="slide slide--news slide--cap cand-soft {% if is_point %}slide--point{% endif %} {{ day_class }}">
+  <div class="pills"><span class="pill">今日のAIニュース</span><span class="pill dt">{{ date }}</span></div>
+  <div class="stack">
+    {% if is_point %}
+    <div class="topic-strip">
+      {% if og_image %}<img class="topic-thumb" src="{{ og_image }}" alt="記事画像">{% endif %}
+      <div class="topic-text">
+        <div class="topic-kicker">{% if source_label %}{{ source_label }}{% else %}TOPIC{% endif %}</div>
+        <div class="topic-title">{% if hook_title %}{{ hook_title }}{% else %}{{ title | replace("のポイント", "") }}{% endif %}</div>
+      </div>
+    </div>
+    <div class="point-badge">💡 ここがポイント</div>
+    {% if points %}
+    <div class="points">
+      {% for pt in points %}
+      <div class="point-card"><span class="num">{{ loop.index }}</span><span class="pt">{{ pt }}</span></div>
+      {% endfor %}
+    </div>
+    {% elif og_image %}
+    <div class="hero hero-small"><img class="hero-img" src="{{ og_image }}" alt="記事画像"></div>
+    {% endif %}
+    {% else %}
+    {% if og_image %}
+    <div class="hero">
+      <img class="hero-img" src="{{ og_image }}" alt="記事画像">
+      {% if source_label %}<span class="source-chip">{{ source_label }}</span>{% endif %}
+    </div>
+    {% endif %}
+    <div class="hook">{% if hook_title %}{{ hook_title }}{% else %}{{ title }}{% endif %}</div>
+    {% if hook_title %}<div class="src-title"><span class="src-label">元記事</span><span class="src-text">{{ title }}</span></div>{% endif %}
+    {% endif %}
+  </div>
+  <div class="well"></div>
+  <div class="halo"></div>
+  {% if ponte_image %}<img class="cap-ponte" src="{{ ponte_image }}" alt="ポンテ">{% endif %}
+  <div class="brandline">{{ channel_name }}</div>
+</div>
+<script>
+/* 字幕帯（video_builder._CAPTION_BOX: bottom=1480, height=320 → 上端 y=1160）へ本文がかからないようにする自動フィット。
+   LIMIT は必ず 1480 - 320 = 1160 に合わせること。.stack の子要素の下端が LIMIT-24 を超えたら
+   画像 → 見出し → 画像 → 元記事 の順に縮める。余白が大きいときは画像を少し広げる。
+   要点カードは CSS 変数（--pt-fs 等）を縮める。 */
+(function () {
+  var LIMIT = 1160, MAX = LIMIT - 24;
+  var root = document.querySelector('.slide--cap'); if (!root) return;
+  var stack = root.querySelector('.stack'); if (!stack) return;
+  function endY() {
+    var m = 0;
+    for (var i = 0; i < stack.children.length; i++) {
+      var c = stack.children[i];
+      if (getComputedStyle(c).display === 'none') continue;
+      m = Math.max(m, c.getBoundingClientRect().bottom);
+    }
+    return m;
+  }
+  function shrink(name, from, min, step, unit) {
+    var v = from;
+    while (endY() > MAX && v > min) { v -= step; root.style.setProperty(name, v + unit); }
+    return v;
+  }
+  if (root.querySelector('.hook')) {
+    var h0 = 420;
+    var hero = shrink('--hero-h', h0, 340, 20, 'px');
+    var hook = shrink('--hook-fs', 74, 64, 4, 'px');
+    hero = shrink('--hero-h', hero, 260, 20, 'px');
+    shrink('--hook-fs', hook, 52, 4, 'px');
+    var src = root.querySelector('.src-title');
+    if (endY() > MAX && src) src.style.display = 'none';
+    // 余白が大きいときは画像を少し広げる（最大 +100px）
+    var g = hero;
+    while (endY() < MAX - 70 && g < h0 + 100) { g += 20; root.style.setProperty('--hero-h', g + 'px'); }
+    if (endY() > MAX) { g -= 20; root.style.setProperty('--hero-h', g + 'px'); }
+  }
+  if (root.querySelector('.points')) {
+    var f = 0;
+    while (endY() > MAX && f < 12) {
+      f++;
+      root.style.setProperty('--pt-fs', (50 - 3 * f) + 'px');
+      root.style.setProperty('--pt-gap', Math.max(8, 20 - 2 * f) + 'px');
+      root.style.setProperty('--pt-pad', Math.max(10, 22 - 3 * f) + 'px');
+      root.style.setProperty('--num-size', Math.max(44, 76 - 6 * f) + 'px');
+    }
+  }
+})();
+</script>
+
+{% else %}
+{% set is_point = "のポイント" in title %}
+<div class="slide slide--news {% if is_point %}slide--point{% endif %} {{ bg_variant }} {{ day_class }}">
+  <div class="topbar">
+    <div class="live-dot"></div>
+    <span class="topbar-title">今日のAIニュース</span>
+    <span class="topbar-date">{{ date }}</span>
+  </div>
+  {% if og_image and not is_point %}
+  <div class="hero">
+    <img class="hero-img" src="{{ og_image }}" alt="記事画像">
+    {% if source_label %}<span class="source-chip">{{ source_label }}</span>{% endif %}
+  </div>
+  {% endif %}
+  <div class="body-area">
+    {% if is_point %}
+    <div class="topic-strip">
+      {% if og_image %}<img class="topic-thumb" src="{{ og_image }}" alt="記事画像">{% endif %}
+      <div class="topic-text">
+        <div class="topic-kicker">{% if source_label %}{{ source_label }}{% else %}TOPIC{% endif %}</div>
+        <div class="topic-title">{{ title | replace("のポイント", "") }}</div>
+      </div>
+    </div>
+    <div class="point-badge">💡 ここがポイント</div>
+    {% else %}
+    <div><span class="headline">{{ title }}</span></div>
+    {% endif %}
+    <div class="dialog">
+      {% if ponte_image %}<img class="ponte-img" src="{{ ponte_image }}" alt="ポンテ">{% else %}<div class="ponte-placeholder" style="width:120px;height:120px;font-size:60px;">🤖</div>{% endif %}
+      <div class="serif-card{% if text_len > 235 %} serif-xxlong{% elif text_len > 185 %} serif-xlong{% elif text_len > 140 %} serif-long{% endif %}">{{ text }}</div>
+    </div>
+  </div>
+  <div class="brandline">{{ channel_name }}</div>
+</div>
+{% endif %}
+
+</body>
+</html>
