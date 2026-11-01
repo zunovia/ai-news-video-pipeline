@@ -401,8 +401,9 @@ async def generate_slides_async(
 ) -> Path:
     """Generate all slide images from a script. Returns images directory.
 
-    template_override / out_subdir / news_json_override は UI プレビュー用の
-    後方互換オプション（未指定時は従来動作）。本番パイプラインからは使わない。
+    template_override / out_subdir は UI プレビュー用の後方互換オプション（未指定時は従来動作）。
+    news_json_override は本番でも使う: orchestrator が collect の保存先（カスタムトピックは
+    news_{date}_{slug}.json）を渡す。未指定なら従来どおり news_{date}.json を読む。
     """
     from playwright.async_api import async_playwright
 
@@ -481,7 +482,7 @@ async def generate_slides_async(
                 if og_file.exists():
                     img_data = base64.b64encode(og_file.read_bytes()).decode()
                     suffix = og_file.suffix.lstrip(".")
-                    mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "webp": "webp"}.get(suffix, "jpeg")
+                    mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "webp": "webp", "gif": "gif"}.get(suffix, "jpeg")
                     og_images[idx] = f"data:image/{mime};base64,{img_data}"
 
     # script_meta: フック見出し・要点（1始まりの記事番号キー。news JSON と同じ並び）
@@ -582,10 +583,15 @@ def generate_slides(
     config_path: Path = Path("config.json"),
     date_str: str = "",
     shorts: bool = False,
+    news_json_override: Path | None = None,
 ) -> Path:
-    """Synchronous wrapper for slide generation."""
+    """Synchronous wrapper for slide generation.
+
+    news_json_override: カスタムトピック（news_{date}_{slug}.json）のときに orchestrator が渡す。
+    """
     import asyncio
-    return asyncio.run(generate_slides_async(script_path, config_path, date_str, shorts))
+    return asyncio.run(generate_slides_async(script_path, config_path, date_str, shorts,
+                                             news_json_override=news_json_override))
 
 
 # ---------------------------------------------------------------------------
@@ -642,7 +648,7 @@ async def generate_thumbnail_async(
         og_file = Path(og_path)
         img_data = base64.b64encode(og_file.read_bytes()).decode()
         suffix = og_file.suffix.lstrip(".")
-        mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "webp": "webp"}.get(suffix, "jpeg")
+        mime = {"jpg": "jpeg", "jpeg": "jpeg", "png": "png", "webp": "webp", "gif": "gif"}.get(suffix, "jpeg")
         og_image = f"data:image/{mime};base64,{img_data}"
 
     # ポンテ画像（normal）
@@ -688,10 +694,12 @@ async def generate_thumbnail_async(
 def generate_thumbnail(
     date_str: str,
     config_path: Path = Path("config.json"),
+    news_json_override: Path | None = None,
 ) -> Path | None:
     """Synchronous wrapper for thumbnail generation."""
     import asyncio
-    return asyncio.run(generate_thumbnail_async(date_str, config_path))
+    return asyncio.run(generate_thumbnail_async(date_str, config_path,
+                                                news_json_override=news_json_override))
 
 
 def main() -> None:

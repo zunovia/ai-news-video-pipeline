@@ -34,14 +34,16 @@ Note: `--date` can also be omitted entirely — `orchestrator.py` defaults to to
 cd C:/02.Claude_Agent/912-plan && python orchestrator.py --date DATE --skip-upload --force --topic "TOPIC"
 ```
 
-Run it in the background (10-20 minutes). Google CSE collection for TOPIC. Phases: collect → script → slides_shorts → video_shorts. If it fails, show the full error output and stop.
+Run it in the background (10-20 minutes). Collection for TOPIC uses **Google News RSS** (Japanese + English editions, last 48h; Google CSE is only added if `GOOGLE_CSE_API_KEY` / `GOOGLE_CSE_ENGINE_ID` are set — CSE no longer accepts new users). Google News links are resolved to the original article before the body is fetched; articles whose body cannot be fetched (under 200 chars of material) are skipped and the next one is used. Phases: collect → script → slides_shorts → video_shorts. If it fails, show the full error output and stop (collect now **fails** when 0 articles could be selected — the error lists the feed problems).
+
+Files (since 2026-11-01): the custom topic's news is saved to `state/news_DATE_<slug>.json` and its progress to `state/pipeline_DATE_<slug>.json` (`<slug>` = TOPIC with spaces/symbols turned into `_`), so it no longer overwrites the AI news of the same DATE. **Script, slides, videos, captions and `review_DATE.md` are still keyed by DATE only** — finish (upload) one of /ai-news or /custom-news for a DATE before building the other for the same DATE, or use a different DATE.
 
 What happens automatically (no manual step needed):
 - **VOICEVOX** is started headless if it is not running (`orchestrator.ensure_voicevox`; engine path `tts.options.engine_path`, default `C:\Users\zunov\AppData\Local\Programs\VOICEVOX\vv-engine\run.exe`). Only if the pipeline fails with "VOICEVOX did not start", start it manually: `Start-Process -FilePath "<engine>" -ArgumentList "--host","127.0.0.1","--port","50021" -WindowStyle Hidden`.
-- News: past 7 days deduplicated (also checks `state/old`), cross-outlet duplicates clustered, max 2 per source, full text summarized into `summary_ja_long` / `facts`.
+- News: past 7 days deduplicated against the ledger `state/seen_topics.json` (rebuilt each run from `news_*.json` in `state` and `state/old` plus `upload_log.json`; never delete it) — by URL and by **same story from another outlet** (LLM judge, title-similarity fallback). Cross-outlet duplicates clustered, max 2 per source, full text summarized into `summary_ja_long` / `facts`. Articles with under 200 chars of material (no body, e.g. openai.com blocks bots) are skipped and replaced by the next one. Per-feed counts are in `pipeline_DATE_<slug>.json` → `feed_stats`; collect problems (dead feed, clustering failed, fewer than top_n) show up as `収集:` WARNs in the review file.
 - Script: only the top `shorts.topics_per_day` articles. Length/format problems (title 15-24 chars, no reading parentheses in titles, exactly 3 points, serif caps) are repaired **field by field**; a repair is only accepted if it does not make that article worse.
 - Fact check (`script.factcheck`): a separate verifier (temperature 0) compares hook_title / intro / explanation / insight / points with `summary_ja_long` / `facts`. Clear errors (`severity: error`) with a valid fix are applied and re-checked (max 2 rounds); `minor` nitpicks are ignored on purpose (fixing them made titles vague — 2026-10-23). Results go to `script_meta_DATE.json` → `factcheck` (`ok` / `fixed` / `unresolved` / `error` / `skipped`).
-- Review file: `state/review_DATE.md` + preflight summary in `state/pipeline_DATE.json` → `preflight`.
+- Review file: `state/review_DATE.md` + preflight summary in `state/pipeline_DATE_<slug>.json` → `preflight`.
 
 ### Step 3: Review — read `state/review_DATE.md`
 

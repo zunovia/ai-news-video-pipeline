@@ -122,7 +122,7 @@ check("通常タイトル: トップ記事label入り", "OpenAI" in meta["title"
 check("通常タイトル: ハッシュタグなし", "#" not in meta["title"], meta["title"])
 check("通常タイトル: ほかN本", "ほか1本" in meta["title"])
 check("通常説明文: ハッシュタグあり", "#AI" in meta["description"])
-check("通常説明文: VOICEVOXクレジット", "VOICEVOX" in meta["description"])
+check("通常説明文: 音声クレジット（config.tts.credit）", config.get("tts", {}).get("credit", "") in meta["description"])
 check("通常メタ: kind=daily", meta.get("kind") == "daily")
 check("タイトル100字以内", len(meta["title"]) <= 100, f"{len(meta['title'])}字")
 
@@ -374,7 +374,7 @@ check("config: 長尺デイリー無効", config.get("pipeline", {}).get("daily_
 check("config: per_topic有効", config.get("shorts", {}).get("per_topic") is True)
 check("config: topics_per_day=3", config.get("shorts", {}).get("topics_per_day") == 3)
 check("config: Ken Burns有効", config.get("video", {}).get("motion", {}).get("enabled") is True)
-check("config: VOICEVOXクレジット設定", "VOICEVOX" in config.get("tts", {}).get("credit", ""))
+check("config: 音声クレジット設定", bool(config.get("tts", {}).get("credit", "")))
 check("config: 子ども向けタグ除去",
       not any(t in ("小学生", "中学生") for t in config.get("youtube", {}).get("default_tags", [])))
 
@@ -888,6 +888,625 @@ for _bad, _why in [
         check(f"修正反映: 不正を拒否（{_why}）", False)
     except FixError as _e:
         check(f"修正反映: 不正を拒否（{_why}）", _why in str(_e), str(_e))
+
+# --- 15. データ収集の修正（2026-11-01: 台帳・文字コード・材料不足・フィード監視・custom-news 分離ほか） ----
+import httpx as _httpx
+import news_collector as _nc2
+import seen_topics as _st
+import api_utils as _au
+from datetime import datetime as _dt2, timedelta as _td2, timezone as _tz2
+from article_extractor import clean_extracted_text
+
+
+def _mock_httpx(handler):
+    """news_collector が作る httpx.Client を MockTransport 付きにする（ネットワーク不要）."""
+    orig = _httpx.Client
+    _nc2.httpx.Client = lambda **kw: orig(transport=_httpx.MockTransport(handler), **kw)
+    return orig
+
+
+def _rss(items: list[tuple[str, str, str]], title: str = "Feed") -> bytes:
+    """(title, link, pubDate) のリストから RSS 2.0 を作る."""
+    body = "".join(f"<item><title>{t}</title><link>{l}</link><pubDate>{d}</pubDate>"
+                   f"<description>&lt;p&gt;概要 &amp;amp; 本文&lt;/p&gt;</description></item>"
+                   for t, l, d in items)
+    return (f'<?xml version="1.0" encoding="UTF-8"?><rss version="2.0"><channel><title>{title}</title>'
+            f"{body}</channel></rss>").encode("utf-8")
+
+
+def _rfc(hours_ago: float) -> str:
+    from email.utils import format_datetime
+    return format_datetime(_dt2.now(_tz2.utc) - _td2(hours=hours_ago))
+
+
+# B12: RSS の題名・概要の文字参照（二重エスケープ）とタグ
+check("RSS文字参照: &amp;Truth → &Truth", _nc2._clean_text("A new startup called &amp;Truth") == "A new startup called &Truth")
+check("RSS文字参照: 二重エスケープ &amp;#8217; → ’", _nc2._clean_text("Meta&amp;#8217;s Muse") == "Meta’s Muse")
+check("RSSタグ除去: <p><b>…</b></p>", _nc2._clean_text("<p>Hello <b>world</b></p><br/>") == "Hello world")
+check("RSSタグ除去: 本文の不等号（a &lt; b &gt; c）は消さない", _nc2._clean_text("a &lt; b &gt; c") == "a < b > c")
+
+# E6: URL の正規化
+check("URL正規化: utm・フラグメント・末尾の/・www・httpの違いを同一視",
+      len({_st.url_key(u) for u in (
+          "https://www.example.com/a/b/?utm_source=x&utm_medium=y#top",
+          "http://example.com/a/b", "https://EXAMPLE.com/a/b/")}) == 1)
+check("URL正規化: 意味のあるクエリは残す", _st.url_key("https://e.com/w?v=1") != _st.url_key("https://e.com/w?v=2"))
+check("URL保存形: 追跡用クエリだけ外し、何も外さないときは元のまま",
+      _st.clean_link("https://e.com/p?id=3&utm_campaign=z#c") == "https://e.com/p?id=3"
+      and _st.clean_link("https://e.com/p?b=2&a=1") == "https://e.com/p?b=2&a=1")
+check("og:image: 相対URLと&amp;を解決",
+      _nc2._og_image_url('<meta property="og:image" content="/img/a.jpg?w=1&amp;h=2">',
+                         "https://site.jp/news/1.html") == "https://site.jp/img/a.jpg?w=1&h=2")
+check("og:image: 引用符なしの属性値・content が先でも取れる（Forbes Japan 形式）",
+      _nc2._og_image_url("<meta content=https://img.example/a.jpg property=og:image>", "https://f.jp/x")
+      == "https://img.example/a.jpg"
+      and _nc2._og_image_url('<meta name="og:image" content="//cdn.example/b.png">', "https://f.jp/x")
+      == "https://cdn.example/b.png")
+check("dedup: utm付きと無しの同じ記事は1件",
+      len(_nc2.deduplicate([{"link": "https://e.com/x?utm_source=rss"}, {"link": "https://e.com/x/"}])) == 1)
+
+# B6: 日付の解析（タイムゾーン・小数秒・未来の日付）
+_d = _nc2._parse_published_date("2026-05-12T21:30:33+09:00")
+check("日付: +09:00 を UTC に正しく換算（上書きしない）", _d is not None and _d.utcoffset() == _td2(hours=9)
+      and _d.astimezone(_tz2.utc).hour == 12, repr(_d))
+check("日付: 小数秒と Z を読める",
+      _nc2._parse_published_date("2026-05-12T12:30:33.123Z") is not None
+      and _nc2._parse_published_date("2026-05-12T12:30:33.123456-04:00") is not None)
+_now = _dt2.now(_tz2.utc)
+_fut = [{"title": "far future", "published_at": (_now + _td2(hours=40)).isoformat()},
+        {"title": "tz typo", "published_at": (_now + _td2(hours=9)).isoformat()},
+        {"title": "old", "published_at": (_now - _td2(hours=60)).isoformat()},
+        {"title": "no date"}]
+check("日付: 遠い未来は除外・TZずれ程度の未来と日付なしは残す",
+      [a["title"] for a in _nc2.filter_by_freshness(_fut, 48)] == ["tz typo", "no date"])
+
+# B5 / B7 / B14: フィードを httpx で取り、異常を記録。新しさで絞ってから件数制限
+_many = [(f"AI item {i}", f"https://g.example/{i}", _rfc(i * 0.5)) for i in range(35)]
+_old_first = ([(f"old AI {i}", f"https://o.example/old{i}", _rfc(100 + i)) for i in range(12)]
+              + [(f"fresh AI {i}", f"https://o.example/new{i}", _rfc(1 + i)) for i in range(11)])
+
+
+def _feed_handler(req):
+    u = str(req.url)
+    if "many" in u:
+        return _httpx.Response(200, content=_rss(_many, "Many"))
+    if "oldfirst" in u:
+        return _httpx.Response(200, content=_rss(_old_first, "OldFirst"))
+    if "ratelimited" in u:
+        return _httpx.Response(429, content=b"slow down")
+    if "empty" in u:
+        return _httpx.Response(200, content=_rss([], "Empty"))
+    raise _httpx.ConnectError("getaddrinfo failed", request=req)
+
+
+_stats: list = []
+_orig_client = _mock_httpx(_feed_handler)
+try:
+    _got = _nc2.collect_from_rss(["https://many.example/feed", "https://oldfirst.example/feed",
+                                  "https://ratelimited.example/feed", "https://empty.example/feed",
+                                  "https://dns-dead.example/feed"],
+                                 max_per_feed=30, max_age_hours=48, stats=_stats)
+finally:
+    _nc2.httpx.Client = _orig_client
+_by = {s["url"].split("//")[1].split(".")[0]: s for s in _stats}
+check("フィード: 1フィード30件まで（35件中）", _by["many"]["kept"] == 30, repr(_by["many"]))
+check("フィード: 古い記事が先頭でも新しい11件を取りこぼさない",
+      _by["oldfirst"]["kept"] == 11 and sum(1 for a in _got if a["title"].startswith("fresh AI")) == 11)
+check("フィード: 新しい順に並ぶ", [a["title"] for a in _got[:2]] == ["AI item 0", "AI item 1"])
+check("フィード: 429・0件・DNS失敗を記録",
+      _by["ratelimited"]["status"] == 429 and _by["empty"]["entries"] == 0 and "ConnectError" in _by["dns-dead"]["error"])
+check("フィード: 取れないフィードを確認用の警告にする（3件）", len(_nc2._feed_warnings(_stats)) == 3,
+      repr(_nc2._feed_warnings(_stats)))
+check("フィード: 概要のタグ・二重エスケープを除去", _got[0]["summary"] == "概要 & 本文", repr(_got[0]["summary"]))
+check("フィード: published_at を UTC で持つ", _got[0]["published_at"].endswith("+00:00"))
+_il = _nc2.interleave_by_source([{"source": "A", "n": 1}, {"source": "A", "n": 2}, {"source": "B", "n": 3}])
+check("上限前にフィードを交互に並べる", [a["n"] for a in _il] == [1, 3, 2])
+_feeds = config["news"]["rss_feeds"]
+check("config: 引けない・転送されるフィードURLを差し替え済み",
+      not any("feeds.technologyreview.com" in f or "technology-lab" in f or "/blog/rss.xml" in f
+              or "blog.google/technology/ai" in f or "venturebeat.com/category" in f for f in _feeds)
+      and "https://arstechnica.com/ai/feed/" in _feeds and "https://openai.com/news/rss.xml" in _feeds)
+
+# B11: Google News RSS（カスタムトピック）
+_gn_rss = ('<?xml version="1.0"?><rss version="2.0"><channel><title>t</title>'
+           '<item><title>新型EVが発表 - 車ニュース</title>'
+           '<link>https://news.google.com/rss/articles/CBMiABC123?oc=5</link>'
+           f'<pubDate>{_rfc(2)}</pubDate><description>&lt;a href="x"&gt;新型EVが発表&lt;/a&gt;</description>'
+           '<source url="https://cars.example.jp">車ニュース</source></item></channel></rss>').encode("utf-8")
+_orig_client = _mock_httpx(lambda req: _httpx.Response(200, content=_gn_rss))
+try:
+    _gn = _nc2.collect_from_google_news("車", max_age_hours=48, stats=[])
+finally:
+    _nc2.httpx.Client = _orig_client
+check("Google News: ja/en の2版から取得し、題名末尾の媒体名を外す",
+      len(_gn) == 2 and _gn[0]["title"] == "新型EVが発表" and _gn[0]["source"] == "車ニュース"
+      and _gn[0]["source_url"] == "https://cars.example.jp" and _gn[0]["summary"] == "", repr(_gn[:1]))
+check("Google News: 転送URLを判定", _nc2.is_google_news_url(_gn[0]["link"])
+      and not _nc2.is_google_news_url("https://cars.example.jp/a"))
+_be = (")]}'\n\n" + _json.dumps([["wrb.fr", "Fbv4je", _json.dumps(
+    ["garturlres", "https://cars.example.jp/articles/1?a=1&b=2", 1]), None, None, None, ""], ["di", 14]]))
+check("Google News: batchexecute の応答から元記事URLを取り出す",
+      _nc2._parse_batchexecute_url(_be) == "https://cars.example.jp/articles/1?a=1&b=2")
+check("Google News: 壊れた応答は空文字", _nc2._parse_batchexecute_url(")]}'\n\nnot json") == "")
+_src_cn = inspect.getsource(_nc2.collect_news)
+check("custom-news: Google CSE だけに頼らず Google News を使う", "collect_from_google_news" in _src_cn)
+
+# B2: 文字コード（charset ヘッダーなし・meta が shift_jis の ITmedia）
+_sjis = '<html><head><meta charset="shift_jis"></head><body><p>生成AIの記事①です</p></body></html>'.encode("cp932")
+check("文字コード: meta の shift_jis で読める（resp.text 相当の UTF-8 決め打ちで化けない）",
+      "生成AIの記事①です" in _nc2.decode_html(_sjis, "text/html"))
+check("文字コード: ヘッダーの charset を優先", "日本語" in _nc2.decode_html("日本語".encode("euc_jp"), "text/html; charset=EUC-JP"))
+check("文字コード: 宣言がなくても推定して読める",
+      "人工知能のニュースです" in _nc2.decode_html(("<p>" + "人工知能のニュースです。" * 20 + "</p>").encode("cp932")))
+_bad_utf8 = ('<meta charset="utf-8"><p>' + "生成AIのニュース本文です。" * 200 + "</p>").encode("utf-8") + b"\xff"
+check("文字コード: UTF-8 宣言で不正バイトが1つだけなら宣言どおりに読む（推定に任せて化けさせない）",
+      "生成AIのニュース本文です。" in _nc2.decode_html(_bad_utf8, "text/html"))
+check("文字化け率: 置換文字1%超を検出", _nc2.replacement_ratio("a" * 98 + "��") > _nc2._MAX_REPLACEMENT_RATIO
+      and _nc2.replacement_ratio("正常な本文") == 0)
+
+# B3: ブラウザと同じ形の UA（openai.com は "Mozilla/5.0" だけだと 403）
+check("UA: ブラウザ形式", "AppleWebKit" in _nc2._PAGE_HEADERS["User-Agent"] and "Chrome/" in _nc2._PAGE_HEADERS["User-Agent"])
+
+# B4: 先頭20万字で切らない（Wired は本文が46万字目以降）
+_big = ("<html><head><script>" + "x" * 470000 + "</script></head><body><article>"
+        + "<p>" + "これは記事の本文の段落です。十分な長さがあります。" * 4 + "</p>" * 1
+        + "<p>" + "二つ目の段落も本文として抽出されるべき内容です。" * 4 + "</p></article></body></html>")
+check("本文抽出: 本文が47万字目以降でも取れる", "二つ目の段落" in extract_main_text(_big))
+check("本文取得: ページを先頭で切っていない", "[:200000]" not in inspect.getsource(_nc2._fetch_article_page))
+
+# B8: 定型文・重複行の除去
+_bp = "\n".join([
+    "親愛なる読者の皆さまへ。…今すぐ寄付は上のボタンから！ ・これまでGIGAZINEを支援してくれたメンバーのリスト",
+    "Buy One Founder Summit Ticket, Get a Second for Free. Register now.",
+    "Disrupt doors open Oct. 13. Get your pass and bring someone with you at 50% off. REGISTER NOW.",
+    "Apple will launch Apple Intelligence in China with iOS 27.3.",
+    "Apple will launch Apple Intelligence in China with iOS 27.3.",
+    "At TechCrunch Disrupt earlier this month, industry insiders tempered much of this criticism.",
+    "この記事は会員限定です。会員登録すると全てご覧いただけます。",
+    "in サイエンス, Posted by log1h_ik",
+    "You can read the machine translated English article A study found…",
+    "Copyright © ITmedia, Inc. All Rights Reserved.",
+    "Stay connected",
+    "関連記事",
+    "Back to top",
+])
+_cl = clean_extracted_text(_bp).split("\n")
+check("定型文: 寄付・イベント広告・会員案内・投稿者行・著作権・ナビを除去し本文は残す",
+      _cl == ["Apple will launch Apple Intelligence in China with iOS 27.3.",
+              "At TechCrunch Disrupt earlier this month, industry insiders tempered much of this criticism."], repr(_cl))
+_long_ad = "Register now " + "本文の文章が続きます。" * 30
+check("定型文: 長い本文行は広告語を含んでも消さない", clean_extracted_text(_long_ad) == _long_ad)
+check("requirements: trafilatura と charset-normalizer",
+      all(k in Path("requirements.txt").read_text(encoding="utf-8") for k in ("trafilatura", "charset-normalizer")))
+
+# B10: NG キーワードの漏れと誤爆
+_ng_more = ["AIで性的な画像を作るアプリが問題に", "性的ディープフェイクの被害が拡大", "Nudify apps are spreading",
+            "Undress AI tools face lawsuits", "DeepNude clone returns", "Law targets NCII on platforms",
+            "Grok generated nonconsensual intimate images", "写真を裸にするAIが拡散", "脱衣AIアプリを規制"]
+_ng_ok = ["裸眼で見える3Dディスプレイ", "個人データが丸裸に、AIの脅威", "個性的なキャラをAIが生成",
+          "女性的なデザインの新型ロボット", "脱衣所の見守りセンサーにAI", "赤裸々に語るAI開発の舞台裏",
+          "性的指向のデータを扱うAIの倫理指針", "裸足で歩くロボットの研究"]
+_blocked = [t for t in _ng_more if _nc2.filter_excluded_content([{"title": t, "summary": ""}])]
+_wrong = [t for t in _ng_ok if not _nc2.filter_excluded_content([{"title": t, "summary": ""}])]
+check("NGフィルタ: 追加語（性的な・ディープフェイク・裸・脱衣・Nudify・undress・NCII等）を除外", not _blocked, repr(_blocked))
+check("NGフィルタ: 裸眼・丸裸・個性的な・女性的な・脱衣所・赤裸々・性的指向・裸足は通す", not _wrong, repr(_wrong))
+_ng_compound = ["児童性的虐待コンテンツの拡散", "AI生成性的画像が問題に", "児童性犯罪の摘発にAI", "児童性的な画像を生成"]
+_ng_compound_ok = ["裸子植物のゲノムをAIで解析", "慢性的な人手不足をAIで解消", "知性的なAI", "理性的な判断"]
+check("NGフィルタ: 漢字に続く複合語（児童性的虐待・生成性的画像・児童性犯罪）も除外（QA指摘の回帰）",
+      not [t for t in _ng_compound if _nc2.filter_excluded_content([{"title": t, "summary": ""}])])
+check("NGフィルタ: 裸子植物・慢性的な・知性的な・理性的な は通す",
+      not [t for t in _ng_compound_ok if not _nc2.filter_excluded_content([{"title": t, "summary": ""}])])
+check("NGフィルタ: 本文取得後の再チェック（include_body）",
+      len(_nc2.filter_excluded_content([{"title": "AI news", "summary": "", "full_text": "...deepnude..."}],
+                                       include_body=True)) == 0
+      and len(_nc2.filter_excluded_content([{"title": "AI news", "summary": "", "full_text": "...deepnude..."}])) == 1)
+
+# B3: 材料不足は選ばず次点で埋める／本文にNG語があれば外す
+_bodies = {"https://a/1": "", "https://a/2": "本文" * 150, "https://a/3": "本文にdeepnudeの話" * 30,
+           "https://a/4": "本文" * 120, "https://a/5": "本文" * 200}
+_calls: list = []
+
+
+def _fake_fetch(client, article, fetch_full_text, max_text_chars):
+    _calls.append(article["link"])
+    article["full_text"] = _bodies[article["link"]]
+    return "<html></html>", article["link"]
+
+
+_orig_fetch, _orig_save = _nc2._fetch_article_page, _nc2._save_og_image
+_nc2._fetch_article_page = _fake_fetch
+_nc2._save_og_image = lambda client, article, html, url, stem: article.__setitem__("og_image", str(stem) + ".jpg")
+try:
+    with _tempfile.TemporaryDirectory() as _ogd:
+        _ogd = Path(_ogd) / "og_images" / "20991231"
+        _ogd.mkdir(parents=True)
+        (_ogd / "og_2.png").write_bytes(b"stale")
+        _cands = [{"title": f"t{i}", "link": f"https://a/{i}", "summary": "短い概要"} for i in range(1, 6)]
+        _none, _ = _nc2.select_with_material([dict(_cands[0])], 2, _ogd, fetch_full_text=True)
+        _stale_kept_on_fail = (_ogd / "og_2.png").exists() and not _none
+        _sel, _skip = _nc2.select_with_material(_cands, 2, _ogd, fetch_full_text=True)
+        _stale_gone = not (_ogd / "og_2.png").exists()
+finally:
+    _nc2._fetch_article_page, _nc2._save_og_image = _orig_fetch, _orig_save
+check("材料不足: 本文なしを外し次点で top_n を満たす",
+      [a["link"] for a in _sel] == ["https://a/2", "https://a/4"], repr([a["link"] for a in _sel]))
+check("材料不足: 外した理由を記録（材料不足・本文NG）",
+      [a.get("skip_reason", "")[:4] for a in _skip] == ["材料不足", "本文にN"], repr([a.get("skip_reason") for a in _skip]))
+check("材料不足: 埋まったら残りは取得しない",
+      _calls == ["https://a/1", "https://a/1", "https://a/2", "https://a/3", "https://a/4"], repr(_calls))
+check("OG画像: 1件も選べなかったときは前回の画像を消さない（前回の news JSON が使う）", _stale_kept_on_fail)
+check("OG画像: 採用順の番号で日付フォルダに保存し、前回の残りを消す",
+      _sel[0]["og_image"].endswith(str(Path("20991231") / "og_1.jpg")) and _sel[1]["og_image"].endswith("og_2.jpg")
+      and _stale_gone, repr([a["og_image"] for a in _sel]))
+check("OG画像: collect_news が日付ごとのフォルダを使う", '"og_images" / (f"{date_str}_' in _src_cn)
+
+
+class _CountingClient:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def generate(self, system, user, max_tokens=500, temperature=None):
+        self.calls.append({"system": system, "user": user, "max_tokens": max_tokens, "temperature": temperature})
+        r = self.responses.pop(0) if self.responses else ""
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+
+_fake = _CountingClient([_json.dumps({"summary_ja_long": "要約です" * 20, "facts": ["事実"], "kid_angle": "x"})])
+_orig_llm = _au.LLMClient
+_au.LLMClient = lambda cfg: _fake
+try:
+    _arts = [{"title_ja": "本文なし", "summary": "短い"}, {"title_ja": "本文あり", "full_text": "本文" * 150}]
+    _nc2.summarize_articles_with_llm(_arts, {"provider": "claude"})
+finally:
+    _au.LLMClient = _orig_llm
+check("要約: 材料200字未満の記事は要約・factsを作らない",
+      len(_fake.calls) == 1 and "facts" not in _arts[0] and _arts[1].get("facts") == ["事実"])
+
+# E3 / E4 / B13: 採点の型・全件失敗・認証エラー・同点
+check("採点: score を数値に（文字列・範囲外・不正値）",
+      _nc2._to_score("7.5") == 7.5 and _nc2._to_score(12) == 10.0 and _nc2._to_score("abc") == 0.0
+      and _nc2._to_score(None) == 0.0)
+check("採点: relevant の文字列 \"false\" を False に",
+      _nc2._to_bool("false") is False and _nc2._to_bool("False") is False and _nc2._to_bool("true") is True
+      and _nc2._to_bool(None) is True and _nc2._to_bool(0) is False)
+_fake = _CountingClient([_json.dumps({"relevant": "false", "score": "8", "title_ja": "無関係な記事", "summary_ja": "x"}),
+                         _json.dumps({"relevant": "true", "score": "7.6", "title_ja": "関係ある記事", "summary_ja": "y"})])
+_au.LLMClient = lambda cfg: _fake
+_orig_sleep = _nc2.time.sleep
+_nc2.time.sleep = lambda s: None
+try:
+    _sc = _nc2.score_articles_with_llm([{"title": "a", "source": "s", "summary": ""},
+                                        {"title": "b", "source": "s", "summary": ""}], {"provider": "claude"})
+    check("採点: 文字列の score でも並べ替えで落ちない・\"false\" は除外扱い",
+          [a["title_ja"] for a in _sc] == ["関係ある記事", "無関係な記事"] and _sc[1]["relevant"] is False
+          and _sc[1]["score"] == 0 and _sc[0]["score"] == 7.6)
+    check("採点: プロンプトにクリーニングと小数第1位の指示",
+          cleaning_short() in _fake.calls[0]["system"] and "小数第1位" in _fake.calls[0]["system"])
+    _fake = _CountingClient(["壊れた応答"] * 20)
+    _au.LLMClient = lambda cfg: _fake
+    try:
+        _nc2.score_articles_with_llm([{"title": "a", "source": "s", "summary": ""}] * 2, {"provider": "claude"})
+        check("採点: 全件失敗なら例外（キーワード採点に切り替えられる）", False)
+    except RuntimeError as _e:
+        check("採点: 全件失敗なら例外（キーワード採点に切り替えられる）", "all 2 articles" in str(_e), str(_e))
+    _fake = _CountingClient([_au.LLMAuthError("401")] * 20)
+    _au.LLMClient = lambda cfg: _fake
+    try:
+        _nc2.score_articles_with_llm([{"title": "a", "source": "s", "summary": ""}] * 5, {"provider": "claude"})
+        check("採点: 認証エラーは再試行せず即座に失敗", False)
+    except _au.LLMAuthError:
+        check("採点: 認証エラーは再試行せず即座に失敗", len(_fake.calls) == 1, f"{len(_fake.calls)} calls")
+finally:
+    _au.LLMClient = _orig_llm
+    _nc2.time.sleep = _orig_sleep
+check("採点: LLMAuthError は RuntimeError の一種（既存の except と互換）", issubclass(_au.LLMAuthError, RuntimeError))
+_tie = sorted([{"score": 7.3, "published_at": "2026-10-31T01:00:00+00:00", "n": "old"},
+               {"score": 7.3, "published_at": "2026-11-01T01:00:00+00:00", "n": "new"},
+               {"score": "8.0", "published_at": "", "n": "top"}], key=_nc2.rank_key, reverse=True)
+check("同点: 新しい記事を先に", [a["n"] for a in _tie] == ["top", "new", "old"])
+
+import anthropic as _anthropic
+_orig_auth = _au.resolve_anthropic_auth
+_tokens = ["k1"]
+_au.resolve_anthropic_auth = lambda *a, **k: ("api_key", _tokens[0])
+try:
+    _lc = _au.LLMClient({"provider": "claude", "claude": {"auth_mode": "api_key"}})
+    _c1, _ = _lc._claude_client()
+    _c2, _chg0 = _lc._claude_client()
+    check("LLMクライアント: 使い回す（毎回作らない）", _c1 is _c2 and _chg0 is False)
+    _tokens[0] = "k2"
+    _c3, _chg = _lc._claude_client()
+    check("LLMクライアント: トークンが変わったら作り直す", _c3 is not _c1 and _chg is True)
+
+    class _AuthFail:
+        class messages:
+            @staticmethod
+            def create(**kw):
+                raise _anthropic.AuthenticationError(
+                    "bad key", response=_httpx.Response(401, request=_httpx.Request("POST", "https://api")), body=None)
+
+    _lc._client = _AuthFail()
+    try:
+        _lc.generate("sys", "user", 10)
+        check("LLMクライアント: 401 は LLMAuthError", False)
+    except _au.LLMAuthError:
+        check("LLMクライアント: 401 は LLMAuthError", True)
+finally:
+    _au.resolve_anthropic_auth = _orig_auth
+
+# E5: クラスタリング失敗を警告として残す
+_au.LLMClient = lambda cfg: _FakeClient("これはJSONではありません")
+_cw: list = []
+try:
+    nc.cluster_topics_with_llm(articles, {"provider": "gemini"}, pool_size=6, warnings=_cw)
+finally:
+    _au.LLMClient = _orig_llm
+check("クラスタ失敗: 警告に残す", len(_cw) == 1 and "クラスタリング" in _cw[0]["check"])
+
+# B1: 消えない台帳と、別媒体の同じ話の除外
+with _tempfile.TemporaryDirectory() as _sd:
+    _sd = Path(_sd)
+    (_sd / "old").mkdir()
+    (_sd / "old" / "news_20261025.json").write_text(_json.dumps({"date": "20261025", "topic": "AI", "articles": [
+        {"title": "OpenAI will stop training models on the live internet", "title_ja": "OpenAI、AIモデルのインターネット学習を中止へ",
+         "link": "https://techcrunch.com/2026/10/24/openai-internet/?utm_source=rss", "summary_ja": "安全のため"},
+        {"title": "Agents you can text", "title_ja": "テキストで使えるAIエージェント", "link": "https://techcrunch.com/agents"},
+        {"title": "Fourth story", "title_ja": "4番目の話", "link": "https://e.com/4"},
+        {"title": "Fourth story", "title_ja": "4番目の話", "link": "https://e.com/4b"},
+    ]}, ensure_ascii=False), encoding="utf-8")
+    (_sd / "upload_log.json").write_text(_json.dumps([
+        {"date": "20261024", "kind": "shorts_topic2", "title": "OpenAI、AIの学習をネットから切り離す #ai #news #shorts"},
+        {"date": "20261025", "kind": "shorts_topic1", "title": "x"},
+    ], ensure_ascii=False), encoding="utf-8")
+    _led = _st.sync_ledger(_sd)
+    _led2 = _st.sync_ledger(_sd)
+    check("台帳: news JSON（state/old）と upload_log から初期データを作る",
+          (_sd / "seen_topics.json").exists() and len(_led) == 5
+          and any(e["date"] == "20261024" and e["title_ja"] == "OpenAI、AIの学習をネットから切り離す" and e["uploaded"]
+                  for e in _led), repr(_led))
+    check("台帳: 投稿済みの印（shorts_topic1 → rank1）",
+          [e["uploaded"] for e in _led if e["date"] == "20261025"] == [True, False, False, False])
+    check("台帳: 何度取り込んでも増えない", len(_led2) == len(_led))
+    (_sd / "old" / "news_20261025.json").unlink()  # news JSON を消しても台帳には残る
+    check("台帳: news JSON を消しても消えない", len(_st.sync_ledger(_sd)) == 5)
+    _cands = [{"title": "OpenAI cuts models off from the internet", "link": "https://techcrunch.com/2026/10/24/openai-internet",
+               "title_ja": "OpenAI、学習中のAIをネット遮断へ"},
+              {"title": "OpenAI cuts off the internet", "link": "https://www.itmedia.co.jp/x.html",
+               "title_ja": "OpenAI、AIモデルのインターネット学習を中止へ　安全対策"},
+              {"title": "Totally new", "link": "https://e.com/new", "title_ja": "まったく別の新しい話題です"}]
+    _kept_url = _nc2.deduplicate_against_past(list(_cands), _sd, "20261027")
+    check("過去URL: 台帳と照合（utm・末尾の/の違いを無視）",
+          [a["link"] for a in _kept_url] == ["https://www.itmedia.co.jp/x.html", "https://e.com/new"])
+    check("過去: 当日分は比べない（作り直しを妨げない）",
+          len(_nc2.deduplicate_against_past(list(_cands), _sd, "20261025")) == 3)
+    _fake = _CountingClient([_json.dumps({"duplicates": [{"candidate": 1, "past": "P1", "event": "OpenAIのネット遮断"}]})])
+    _au.LLMClient = lambda cfg: _fake
+    try:
+        _kept = _nc2.deduplicate_stories_against_past(list(_kept_url), {"provider": "claude"}, _sd, "20261027",
+                                                      max_rank=2)
+    finally:
+        _au.LLMClient = _orig_llm
+    check("過去の同じ話: LLM が同じと判定した候補を除く", [a["link"] for a in _kept] == ["https://e.com/new"], repr(_kept))
+    _sys = _fake.calls[0]["system"]
+    check("過去の同じ話: プロンプトにクリーニング・温度0・max_tokens・投稿済みと上位のみ",
+          cleaning_short() in _sys and "__CLEANING__" not in _sys and _fake.calls[0]["temperature"] == 0
+          and _fake.calls[0]["max_tokens"] >= 400 and "4番目の話" not in _fake.calls[0]["user"]
+          and "切り離す" in _fake.calls[0]["user"], _fake.calls[0]["user"])
+    _fake = _CountingClient([_json.dumps({"duplicates": [{"candidate": 1, "past": "P99"}, {"candidate": 2}]})])
+    _au.LLMClient = lambda cfg: _fake
+    try:
+        _kept_bad = _nc2.deduplicate_stories_against_past(list(_kept_url), {"provider": "claude"}, _sd, "20261027")
+    finally:
+        _au.LLMClient = _orig_llm
+    check("過去の同じ話: どの過去記事か示せない判定（範囲外・欠落）は採らない", len(_kept_bad) == 2, repr(_kept_bad))
+    check("過去の同じ話: テーマが近いだけなら別、という規則", "テーマや分野が近いだけ" in _nc2.PAST_DEDUP_SYSTEM_PROMPT)
+    _fake = _CountingClient([_json.dumps({"duplicates": [{"candidate": 2, "past": "P1", "event": "AIの話"}]})])
+    _au.LLMClient = lambda cfg: _fake
+    try:
+        _kept_guard = _nc2.deduplicate_stories_against_past(list(_kept_url), {"provider": "claude"}, _sd, "20261027")
+    finally:
+        _au.LLMClient = _orig_llm
+    check("過去の同じ話: 共通の固有名も題名の似かたもない組は LLM が同じと言っても残す", len(_kept_guard) == 2)
+    _fake = _CountingClient(["壊れた応答"])
+    _au.LLMClient = lambda cfg: _fake
+    _pw: list = []
+    try:
+        _kept = _nc2.deduplicate_stories_against_past(list(_kept_url), {"provider": "claude"}, _sd, "20261027",
+                                                      warnings=_pw)
+    finally:
+        _au.LLMClient = _orig_llm
+    check("過去の同じ話: LLM 失敗時は題名の似かたで判定し、別の話は残す",
+          [a["link"] for a in _kept] == ["https://e.com/new"] and len(_pw) == 1, repr([a["link"] for a in _kept]))
+    _fake = _CountingClient([_au.LLMAuthError("401")])
+    _au.LLMClient = lambda cfg: _fake
+    _aw: list = []
+    try:
+        _kept_auth = _nc2.deduplicate_stories_against_past(list(_kept_url), {"provider": "claude"}, _sd, "20261027",
+                                                           warnings=_aw)
+        check("過去の同じ話: 認証エラーでも収集を止めず簡易判定に切り替える（QA指摘）",
+              [a["link"] for a in _kept_auth] == ["https://e.com/new"] and len(_aw) == 1)
+    except Exception as _e:
+        check("過去の同じ話: 認証エラーでも収集を止めず簡易判定に切り替える（QA指摘）", False, repr(_e))
+    finally:
+        _au.LLMClient = _orig_llm
+    _st.record_selection(_sd, "20261027", "", [{"title": "t", "title_ja": "今日の記事", "link": "https://e.com/today"}])
+    _st.record_selection(_sd, "20261027", "", [{"title": "t2", "title_ja": "作り直した記事", "link": "https://e.com/today2"}])
+    _today = [e for e in _st.load_ledger(_sd) if e["date"] == "20261027"]
+    check("台帳: 同じ日の作り直しは未投稿の行を置き換える", [e["title_ja"] for e in _today] == ["作り直した記事"])
+with _tempfile.TemporaryDirectory() as _bd:
+    _bd = Path(_bd)
+    (_bd / "seen_topics.json").write_text("[]", encoding="utf-8")
+    _ok_list = _st.sync_ledger(_bd) == [] and (_bd / "seen_topics.broken.json").exists()
+    (_bd / "seen_topics.json").write_text(_json.dumps({"entries": [{"title": "date欠落"}, "文字列の行",
+                                                                 {"date": "20261020", "key": "k", "rank": "x"}]}),
+                                          encoding="utf-8")
+    _ok_rows = [e.get("key") for e in _st.sync_ledger(_bd)] == ["k"]
+    _ok_rank = len(_nc2.deduplicate_stories_against_past([{"title": "a"}], {"provider": "claude"}, _bd, "20261021")) == 1
+    (_bd / "old").mkdir()
+    (_bd / "old" / "news_20261019.json").write_text(_json.dumps({"articles": [{"link": None, "title": None}, 5]}),
+                                                    encoding="utf-8")
+    (_bd / "upload_log.json").write_text(_json.dumps([{"date": "20261019", "kind": "shorts_topic9", "title": 123}]),
+                                         encoding="utf-8")
+    try:
+        _ok_types = len(_st.sync_ledger(_bd)) == 3
+    except Exception as _e:
+        _ok_types = False
+check("台帳: 形が違う（[]・date欠落・文字列の行・数字でない rank・null の link・数値の title）でも落ちない（QA指摘）",
+      _ok_list and _ok_rows and _ok_rank and _ok_types)
+_orig_sync = _st.sync_ledger
+_st.sync_ledger = lambda d: (_ for _ in ()).throw(OSError("disk error"))
+_lw: list = []
+try:
+    _r1 = _nc2.deduplicate_against_past([{"link": "https://e.com/1"}], Path("."), "20261027", warnings=_lw)
+    _r2 = _nc2.deduplicate_stories_against_past([{"title": "a"}], {"provider": "claude"}, Path("."), "20261027")
+    check("台帳: 読めなくても収集は続け、警告に残す（QA指摘）", len(_r1) == 1 and len(_r2) == 1 and len(_lw) == 1)
+except Exception as _e:
+    check("台帳: 読めなくても収集は続け、警告に残す（QA指摘）", False, repr(_e))
+finally:
+    _st.sync_ledger = _orig_sync
+check("固有名の共通: Pentagon/OpenAI は共通、Phonic-1 と Prism・Gemini と Apple は共通なし",
+      _st.shares_entity({"title": "How a Contractor's Claude Agent Got Into the Pentagon"},
+                        {"title": "A Defense Contractor Gave Their AI Agent Access to a Pentagon System"})
+      and _st.shares_entity({"title_ja": "OpenAI、学習中のAIをネット遮断へ"}, {"title_ja": "OpenAI、AIの学習をネットから切り離す"})
+      and not _st.shares_entity({"title_ja": "音声AI「Phonic-1」が登場"}, {"title_ja": "音声AI「Prism」が登場"})
+      and not _st.shares_entity({"title_ja": "GeminiがGoogle Docsを直接編集"}, {"title_ja": "AppleがPages・Keynoteに新AI機能"})
+      and not _st.shares_entity({"title_ja": "AIエージェントの新ツール"}, {"title_ja": "エージェント向けツールを公開"}))
+check("題名の簡易判定: 別の話を同じとみなさない",
+      not _st.is_similar_title({"title_ja": "AnthropicのIPO目論見書が明かす衝撃"},
+                               {"title_ja": "Appleが3つのアプリにAI機能"})
+      and not _st.is_similar_title({"title_ja": "OpenAIがGPT-6.1を公開"}, {"title_ja": "OpenAIが新しいブラウザを発表"}))
+
+# E1: custom-news の保存先を分ける（AIニュースを上書きしない）
+check("custom-news: news_{date}_{slug}.json に保存",
+      _nc2.news_json_path(Path("state"), "20261101", "宇宙 開発") == Path("state/news_20261101_宇宙_開発.json")
+      and _nc2.news_json_path(Path("state"), "20261101") == Path("state/news_20261101.json"))
+check("custom-news: collect_news が保存先を news_json_path で決める", "news_json_path(state_dir, date_str, topic)" in _src_cn)
+import review_report as _rr
+import youtube_uploader as _yu2
+check("custom-news: 確認用まとめ・アップロードも同じ場所を読む",
+      _rr._news_path(Path("s"), "20261101", "車") == _yu2._news_json_path(Path("s"), "20261101", "車")
+      == Path("s/news_20261101_車.json"))
+_src_rp = inspect.getsource(_orch.run_pipeline)
+check("custom-news: pipeline state も別ファイル", "pipeline_{date_str}_{topic_slug(topic)}.json" in _src_rp)
+check("custom-news: スライドに collect の news JSON を渡す",
+      "news_json_override=_news_override(state)" in inspect.getsource(_orch.run_slides_shorts))
+
+# E2 / E5 / B5: 0件なら例外・収集の警告を確認用まとめに出す
+with _tempfile.TemporaryDirectory() as _cd:
+    _cd = Path(_cd)
+    _ccfg = {"news": {"rss_feeds": [], "top_n": 5, "fetch_full_text": True}, "llm": {"provider": "claude"},
+             "paths": {"state_dir": str(_cd / "state")}, "shorts": {"topics_per_day": 3}}
+    (_cd / "config.json").write_text(_json.dumps(_ccfg), encoding="utf-8")
+    try:
+        _nc2.collect_news(_cd / "config.json", "20991231")
+        check("収集: 0件なら例外（done にしない）", False)
+    except RuntimeError as _e:
+        check("収集: 0件なら例外（done にしない）", "No articles selected" in str(_e), str(_e))
+    check("収集: 0件のときは news JSON を書かない", not (_cd / "state" / "news_20991231.json").exists())
+    (_cd / "state" / "news_20991231.json").write_text(_json.dumps({"articles": [], "collect_warnings": [
+        {"check": "フィードが取れない", "detail": "https://dead.example — HTTP 429"}]}, ensure_ascii=False), encoding="utf-8")
+    _pf = _rr.preflight("20991231", {"paths": {"state_dir": str(_cd / "state"), "output_dir": str(_cd)},
+                                     "shorts": {"topics_per_day": 3}}, topics=[])
+    check("確認用まとめ: 収集の警告を WARN で出す",
+          any(c["level"] == "WARN" and c["check"] == "収集: フィードが取れない" for c in _pf), repr(_pf))
+check("収集: top_n・Shorts 本数に足りないときの警告", "Shorts の本数" in _src_cn and "より少ない" in _src_cn)
+check("収集: 絞り込み前の件数と各段階の件数を保存", '"total_fetched"' in _src_cn and '"counts"' in _src_cn
+      and '"feed_stats"' in _src_cn)
+check("収集: pipeline state にフィードごとの件数を残す", 'state["feed_stats"]' in inspect.getsource(_orch.run_collect))
+
+# QA1 指摘: 漢字だけの固有名の歯止め／解決後 URL の再照合／ページ取得の上限／gif／slug 表記
+import seen_topics as _st3
+
+_k = lambda t, tj="": {"title": t, "title_ja": tj}
+check("固有名: 漢字だけの固有名（国防総省）が共通なら同じ話候補として採る",
+      _st3.shares_entity(_k("", "国防総省がAI契約を発表"), _k("", "国防総省、新たなAI調達を開始")))
+check("固有名: 経済産業省・東京大学も採る",
+      _st3.shares_entity(_k("", "経済産業省が半導体支援を決定"), _k("", "経済産業省の半導体補助、第2弾")) and
+      _st3.shares_entity(_k("", "東京大学が新モデルを公開"), _k("", "東京大学の研究チームが成果")))
+check("固有名: 一般的な漢字語（人工知能・生成・発表）だけの共通は却下",
+      not _st3.shares_entity(_k("", "人工知能の生成を発表"), _k("", "生成人工知能の導入を発表"))
+      and not _st3.shares_entity(_k("", "人工知能開発の最新動向"), _k("", "人工知能開発を拡大")))
+check("固有名: 漢字の固有名候補から一般語は除かれ固有名は残る",
+      _st3._kanji_names("人工知能開発を発表") == set() and _st3._kanji_names("国防総省が人工知能を導入") == {"国防総省"})
+
+_kc = {"https://a/1": "https://news.example/story", "https://a/2": "https://old.example/seen/",
+       "https://a/3": "https://news.example/story?utm_source=x", "https://a/4": "https://ok.example/4",
+       "https://a/5": "https://ok.example/5"}
+
+
+def _fake_fetch2(client, article, fetch_full_text, max_text_chars):
+    article["link"] = _kc[article["link"]]
+    article["full_text"] = "本文" * 150
+    return "<html></html>", article["link"]
+
+
+_orig_fetch, _orig_save = _nc2._fetch_article_page, _nc2._save_og_image
+_nc2._fetch_article_page = _fake_fetch2
+_nc2._save_og_image = lambda client, article, html, url, stem: None
+try:
+    with _tempfile.TemporaryDirectory() as _ogd:
+        _c2 = [{"title": f"t{i}", "link": f"https://a/{i}", "summary": ""} for i in range(1, 6)]
+        _s2, _k2 = _nc2.select_with_material(_c2, 3, Path(_ogd), fetch_full_text=True,
+                                             exclude_keys={_nc2.url_key("https://old.example/seen")})
+finally:
+    _nc2._fetch_article_page, _nc2._save_og_image = _orig_fetch, _orig_save
+check("解決後URL: 過去分と同じURLは選ばず skip_reason を残す",
+      [a["title"] for a in _k2 if "重複" in a.get("skip_reason", "")] == ["t2", "t3"], repr([(a["title"], a.get("skip_reason")) for a in _k2]))
+check("解決後URL: 同じ回で選定済みのURL（utm違い）も重複扱い、残りで top_n を埋める",
+      [a["title"] for a in _s2] == ["t1", "t4", "t5"], repr([a["title"] for a in _s2]))
+check("解決後URL: collect_news が過去URLキーを渡す", "exclude_keys=past_url_keys(" in _src_cn)
+
+
+class _FakeStream:
+    def __init__(self, chunks):
+        self.chunks, self.headers, self.url = chunks, {"content-type": "text/html; charset=utf-8"}, "https://big.example/p"
+        self.read_bytes = 0
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def raise_for_status(self):
+        pass
+
+    def iter_bytes(self):
+        for c in self.chunks:
+            self.read_bytes += len(c)
+            yield c
+
+
+class _FakeClient:
+    def __init__(self, chunks):
+        self.stream_obj = _FakeStream(chunks)
+
+    def stream(self, method, url, headers=None):
+        return self.stream_obj
+
+
+_head = ("<html><body><article><p>" + "これは記事の本文の段落です。十分な長さがあります。" * 6 + "</p>"
+         "<p>" + "二つ目の段落も本文として抽出されるべき内容です。" * 4 + "</p></article>").encode("utf-8")
+_chunks = [_head] + [b"x" * 65536] * 200  # 約13MB
+_fc = _FakeClient(_chunks)
+_art = {"title": "big", "link": "https://big.example/p"}
+_html, _url = _nc2._fetch_article_page(_fc, _art, True, 3000)
+check("ページ取得: 5MB で打ち切る（超えた分は読まない）",
+      len(_html.encode("utf-8")) <= _nc2._MAX_PAGE_BYTES and _fc.stream_obj.read_bytes <= _nc2._MAX_PAGE_BYTES + 65536
+      and _url == "https://big.example/p", repr((len(_html), _fc.stream_obj.read_bytes)))
+check("ページ取得: 打ち切っても先頭の本文は抽出できる", "二つ目の段落" in _art.get("full_text", ""))
+_fc2 = _FakeClient([_head])
+check("ページ取得: 上限未満のページはそのまま読む", _nc2._fetch_article_page(_fc2, {"title": "s", "link": "https://s/"}, False, 3000)[0] == _head.decode("utf-8"))
+
+_sg_src = Path("slide_generator.py").read_text(encoding="utf-8")
+check("MIME: slide_generator の対応表に gif（OG 画像の保存形式と一致）",
+      _sg_src.count('"gif": "gif"') == 2 and '".gif"' in inspect.getsource(_nc2) )
+_cn_md = Path("skills/custom-news.md").read_text(encoding="utf-8")
+check("skills/custom-news.md: カスタムトピックの state は pipeline_DATE_<slug>.json 表記",
+      "pipeline_DATE_<slug>.json" in _cn_md.splitlines()[42] and "pipeline_DATE_<slug>.json" in _cn_md.splitlines()[45])
 
 print()
 if failures:

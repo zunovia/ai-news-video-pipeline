@@ -13,6 +13,14 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+class LLMAuthError(RuntimeError):
+    """認証・権限エラー（401/403・キーやログインがない）.
+
+    再試行しても直らないため、呼び出し側は記事ごとの再試行をせず即座に止める。
+    RuntimeError のサブクラスなので、従来の except RuntimeError もそのまま効く。
+    """
+
+
 # ---------------------------------------------------------------------------
 # API Key resolution
 # ---------------------------------------------------------------------------
@@ -28,7 +36,7 @@ def _resolve_oauth_token() -> str:
                 return token
         except (json.JSONDecodeError, KeyError):
             pass
-    raise RuntimeError(
+    raise LLMAuthError(
         "Claude subscription token not found. Log in with `claude /login` "
         "(this project is configured for subscription-only auth, no billed API)."
     )
@@ -95,7 +103,7 @@ def resolve_gemini_api_key(config: dict | None = None) -> str:
             if key:
                 return key
 
-    raise RuntimeError(
+    raise LLMAuthError(
         "Gemini API key not found. Set GEMINI_API_KEY env var or create .gemini_api_key file."
     )
 
@@ -117,6 +125,7 @@ class LLMClient:
         self.provider = config.get("provider", "gemini")
         self.config = config
         self._client = None
+        self._client_token = ""
 
     def generate(
         self,
@@ -146,10 +155,12 @@ class LLMClient:
         from google import genai
 
         gemini_cfg = self.config.get("gemini", {})
-        api_key = resolve_gemini_api_key(self.config)
         model = gemini_cfg.get("model", "gemini-2.0-flash-lite")
 
-        client = genai.Client(api_key=api_key)
+        # クライアントは使い回す（記事50件の採点で毎回作り直さない）
+        if self._client is None:
+            self._client = genai.Client(api_key=resolve_gemini_api_key(self.config))
+        client = self._client
 
         config_kwargs = {
             "system_instruction": system_prompt,
@@ -163,12 +174,46 @@ class LLMClient:
                 thinking_budget=0,
             )
 
-        response = client.models.generate_content(
-            model=model,
-            contents=user_prompt,
-            config=genai.types.GenerateContentConfig(**config_kwargs),
-        )
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=user_prompt,
+                config=genai.types.GenerateContentConfig(**config_kwargs),
+            )
+        except Exception as e:
+            # 無効なキーは 401/403 のほか 400 + API_KEY_INVALID で返ることがある
+            code = getattr(e, "code", None)
+            if code in (401, 403) or (code == 400 and "API_KEY_INVALID" in str(e)):
+                raise LLMAuthError(f"Gemini auth error ({code}): {e}") from e
+            raise
         return response.text
+
+    def _claude_client(self, force_new: bool = False):
+        """anthropic クライアントを使い回す。トークンが変わったときだけ作り直す."""
+        import anthropic
+
+        claude_cfg = self.config.get("claude", {})
+        # "subscription" (default here) forces Claude Code login only — never a billed API key.
+        subscription_only = claude_cfg.get("auth_mode", "subscription") == "subscription"
+        mode, token = resolve_anthropic_auth(
+            claude_cfg.get("api_key_env", "ANTHROPIC_API_KEY"),
+            subscription_only=subscription_only,
+        )
+        if not force_new and self._client is not None and self._client_token == token:
+            return self._client, False
+
+        # A normal API key uses x-api-key; a Claude Code OAuth token must be sent
+        # as a Bearer auth_token with the OAuth beta header.
+        if mode == "oauth":
+            client = anthropic.Anthropic(
+                auth_token=token,
+                default_headers={"anthropic-beta": _OAUTH_BETA},
+            )
+        else:
+            client = anthropic.Anthropic(api_key=token)
+        changed = self._client is not None and self._client_token != token
+        self._client, self._client_token = client, token
+        return client, changed
 
     def _generate_claude(
         self,
@@ -180,30 +225,15 @@ class LLMClient:
         import anthropic
 
         claude_cfg = self.config.get("claude", {})
-        # "subscription" (default here) forces Claude Code login only — never a billed API key.
-        subscription_only = claude_cfg.get("auth_mode", "subscription") == "subscription"
-        mode, token = resolve_anthropic_auth(
-            claude_cfg.get("api_key_env", "ANTHROPIC_API_KEY"),
-            subscription_only=subscription_only,
-        )
         model = claude_cfg.get("model", "claude-haiku-4-5")
-
-        # A normal API key uses x-api-key; a Claude Code OAuth token must be sent
-        # as a Bearer auth_token with the OAuth beta header.
-        if mode == "oauth":
-            client = anthropic.Anthropic(
-                auth_token=token,
-                default_headers={"anthropic-beta": _OAUTH_BETA},
-            )
-        else:
-            client = anthropic.Anthropic(api_key=token)
+        client, _ = self._claude_client()
 
         # anthropic SDK 1.x は temperature 引数を削除済み。受け付ける旧世代モデル
         # （Haiku 4.5 / 4.6系など）のときだけ extra_body で渡す（新世代は非既定値で400）
         extra = {}
         if temperature is not None and model.startswith(_SAMPLING_MODELS):
             extra["extra_body"] = {"temperature": temperature}
-        response = client.messages.create(
+        kwargs = dict(
             model=model,
             max_tokens=max_tokens,
             **extra,
@@ -216,4 +246,16 @@ class LLMClient:
             ],
             messages=[{"role": "user", "content": user_prompt}],
         )
+        try:
+            response = client.messages.create(**kwargs)
+        except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e:
+            # ログイン中にトークンが更新されていれば1回だけ作り直して再送する。
+            # 同じトークンのままなら再試行しても直らないので即座に失敗させる。
+            client, changed = self._claude_client()
+            if not changed:
+                raise LLMAuthError(f"Claude auth error ({e.status_code}): {e}") from e
+            try:
+                response = client.messages.create(**kwargs)
+            except (anthropic.AuthenticationError, anthropic.PermissionDeniedError) as e2:
+                raise LLMAuthError(f"Claude auth error ({e2.status_code}): {e2}") from e2
         return response.content[0].text

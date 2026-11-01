@@ -293,6 +293,8 @@ def build_video(
     try:
         # Import 911-plan modules
         import generate_video as gv
+        import gemini_tts
+        gemini_tts.register(gv)
 
         # Import 912-plan slide_generator for correct nested-bracket parsing.
         # slide_generator uses r"「((?:[^「」]|「[^」]*」)*)」" which handles
@@ -722,8 +724,10 @@ def build_topic_shorts(
 
     try:
         import generate_video as gv
+        import gemini_tts
         import slide_generator as sg
 
+        gemini_tts.register(gv)
         engine_cfg = gv.Config.from_json(tmp_config)
 
         raw_slides = sg.parse_slides(script_path)

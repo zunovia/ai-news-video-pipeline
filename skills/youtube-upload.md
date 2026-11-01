@@ -43,8 +43,9 @@ config = load_config()
 date_str = 'DATE'
 topic = 'TOPIC_OR_EMPTY'
 
+from news_collector import news_json_path
 news_data = None
-news_path = Path(f'state/news_{date_str}.json')
+news_path = news_json_path(Path('state'), date_str, topic)  # custom topic: state/news_DATE_<slug>.json
 if news_path.exists():
     with open(news_path, encoding='utf-8') as f:
         news_data = json.load(f)

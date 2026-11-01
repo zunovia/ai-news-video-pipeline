@@ -597,6 +597,12 @@ def _add_to_playlist(service, video_id: str, playlist_name: str) -> None:
         logger.warning("Failed to add to playlist '%s': %s", playlist_name, e)
 
 
+def _news_json_path(state_dir: Path, date_str: str, topic: str = "") -> Path:
+    """news JSON の場所（カスタムトピックは news_{date}_{slug}.json）."""
+    from news_collector import news_json_path
+    return news_json_path(state_dir, date_str, topic)
+
+
 def upload_topic_shorts(
     date_str: str,
     config_path: Path = Path("config.json"),
@@ -616,7 +622,7 @@ def upload_topic_shorts(
 
     # news JSON（記事情報）と script_meta（hook_title）を読み込む
     news_articles: list[dict] = []
-    news_path = state_dir / f"news_{date_str}.json"
+    news_path = _news_json_path(state_dir, date_str, topic)
     if news_path.exists():
         with open(news_path, encoding="utf-8") as f:
             news_articles = json.load(f).get("articles", [])
@@ -686,7 +692,7 @@ def upload(
 
     # Load news data for URL inclusion in description
     news_data = None
-    news_path = state_dir / f"news_{date_str}.json"
+    news_path = _news_json_path(state_dir, date_str, topic)
     if news_path.exists():
         with open(news_path, encoding="utf-8") as f:
             news_data = json.load(f)

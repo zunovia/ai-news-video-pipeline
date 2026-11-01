@@ -87,13 +87,19 @@ def _video_duration(path: Path) -> float | None:
         return None
 
 
+def _news_path(state_dir: Path, date_str: str, topic: str = "") -> Path:
+    # カスタムトピックは news_{date}_{slug}.json（AIニュースと分けて保存している）
+    from news_collector import news_json_path
+    return news_json_path(state_dir, date_str, topic)
+
+
 def collect_topics(date_str: str, config: dict, topic: str = "") -> list[dict]:
     """トピック（動画1本）ごとの確認材料を集める."""
     state_dir = Path(config["paths"]["state_dir"])
     output_dir = Path(config["paths"]["output_dir"])
     top_n = config.get("shorts", {}).get("topics_per_day", 3)
 
-    news = _load_json(state_dir / f"news_{date_str}.json").get("articles", [])
+    news = _load_json(_news_path(state_dir, date_str, topic)).get("articles", [])
     meta = _load_json(state_dir / f"script_meta_{date_str}.json")
     meta_arts = meta.get("articles", [])
     fc_arts = {a.get("index"): a for a in (meta.get("factcheck") or {}).get("articles", [])}
@@ -156,6 +162,9 @@ def preflight(date_str: str, config: dict, topics: list[dict] | None = None,
         add("WARN", 0, "事実確認の記録がない", "旧形式の台本。目視で元記事と照合する")
     elif fc.get("status") == "error":
         add("WARN", 0, "事実確認が失敗", fc.get("error", ""))
+    # 収集時の警告（取れないフィード・クラスタリング失敗・選定不足など。news JSON の collect_warnings）
+    for w in _load_json(_news_path(state_dir, date_str, topic)).get("collect_warnings", []):
+        add("WARN", 0, f"収集: {w.get('check', '')}", w.get("detail", ""))
 
     for t in topics:
         i, hook = t["index"], t["hook_title"]
@@ -269,7 +278,7 @@ def build_review(date_str: str, config_path: Path = Path("config.json"),
     config = json.loads(Path(config_path).read_text(encoding="utf-8"))
     state_dir = Path(config["paths"]["state_dir"])
     topics = collect_topics(date_str, config, topic)
-    checks = preflight(date_str, config, topics)
+    checks = preflight(date_str, config, topics, topic=topic)
     meta = _load_json(state_dir / f"script_meta_{date_str}.json")
     path = state_dir / f"review_{date_str}.md"
     path.write_text(render_review(date_str, topics, checks, meta), encoding="utf-8")

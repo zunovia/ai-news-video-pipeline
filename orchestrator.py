@@ -76,6 +76,10 @@ def ensure_voicevox(config_path: Path, wait_sec: int = 90) -> None:
     from urllib.parse import urlparse
 
     tts = load_config(config_path).get("tts", {})
+    if tts.get("provider") == "gemini":
+        import gemini_tts
+        gemini_tts.check_api_key()
+        return
     if tts.get("provider") != "voicevox":
         return
     opts = tts.get("options", {})
@@ -105,17 +109,37 @@ def ensure_voicevox(config_path: Path, wait_sec: int = 90) -> None:
 # Phase executors
 # ---------------------------------------------------------------------------
 
+def _news_path(date_str: str, config_path: Path, state: dict, topic: str = "") -> Path:
+    """この実行の news JSON（collect が記録したもの。なければ日付とトピックから決める）."""
+    if state.get("news_path"):
+        return Path(state["news_path"])
+    from news_collector import news_json_path
+    return news_json_path(Path(load_config(config_path)["paths"]["state_dir"]), date_str, topic)
+
+
 def run_collect(date_str: str, config_path: Path, state: dict, topic: str = "") -> dict:
     from news_collector import collect_news
     news_path = collect_news(config_path, date_str, topic=topic)
     state["news_path"] = str(news_path)
+    # フィードごとの件数と収集時の警告を一目で分かるように残す（詳細は news JSON）
+    try:
+        with open(news_path, encoding="utf-8") as f:
+            news = json.load(f)
+        state["feed_stats"] = [
+            {k: st.get(k) for k in ("url", "status", "entries", "fresh", "kept", "error") if st.get(k) is not None}
+            for st in news.get("feed_stats", [])
+        ]
+        state["collect_counts"] = news.get("counts", {})
+        state["collect_warnings"] = news.get("collect_warnings", [])
+    except (OSError, ValueError) as e:
+        logger.warning("Could not read collect stats from %s: %s", news_path, e)
     state["phases"]["collect"] = "done"
     return state
 
 
 def run_script(date_str: str, config_path: Path, state: dict, script_type: str, topic: str = "") -> dict:
     from script_generator import generate_script
-    news_path = Path(state.get("news_path", f"state/news_{date_str}.json"))
+    news_path = _news_path(date_str, config_path, state, topic)
     script_path = generate_script(news_path, config_path, script_type, topic=topic)
     state["script_path"] = str(script_path)
 
@@ -133,16 +157,22 @@ def run_script(date_str: str, config_path: Path, state: dict, script_type: str, 
     return state
 
 
+def _news_override(state: dict) -> Path | None:
+    """スライドが読む news JSON（カスタムトピックは news_{date}_{slug}.json なので明示する）."""
+    return Path(state["news_path"]) if state.get("news_path") else None
+
+
 def run_slides(date_str: str, config_path: Path, state: dict) -> dict:
     from slide_generator import generate_slides
     script_path = Path(state.get("script_path", f"state/script_{date_str}.md"))
-    images_dir = generate_slides(script_path, config_path, date_str)
+    images_dir = generate_slides(script_path, config_path, date_str,
+                                 news_json_override=_news_override(state))
     state["images_dir"] = str(images_dir)
 
     # カスタムサムネイル生成（config.youtube.custom_thumbnail で制御。失敗しても続行）
     try:
         from slide_generator import generate_thumbnail
-        thumb_path = generate_thumbnail(date_str, config_path)
+        thumb_path = generate_thumbnail(date_str, config_path, news_json_override=_news_override(state))
         if thumb_path:
             state["thumbnail_path"] = str(thumb_path)
     except Exception as e:
@@ -174,7 +204,8 @@ def run_upload(date_str: str, config_path: Path, state: dict, script_type: str, 
 def run_slides_shorts(date_str: str, config_path: Path, state: dict) -> dict:
     from slide_generator import generate_slides
     script_path = Path(state.get("script_path", f"state/script_{date_str}.md"))
-    images_dir = generate_slides(script_path, config_path, date_str, shorts=True)
+    images_dir = generate_slides(script_path, config_path, date_str, shorts=True,
+                                 news_json_override=_news_override(state))
     state["images_shorts_dir"] = str(images_dir)
     state["phases"]["slides_shorts"] = "done"
     return state
@@ -284,7 +315,12 @@ def run_pipeline(
     if date_str is None:
         date_str = today_jst()
 
-    state_path = state_dir / f"pipeline_{date_str}.json"
+    # カスタムトピックは AI ニュースの進捗（news_path など）を上書きしないよう別ファイル
+    if topic:
+        from news_collector import topic_slug
+        state_path = state_dir / f"pipeline_{date_str}_{topic_slug(topic)}.json"
+    else:
+        state_path = state_dir / f"pipeline_{date_str}.json"
     state = load_state(state_path)
 
     # Force mode: reset all phases

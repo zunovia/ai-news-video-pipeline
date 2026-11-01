@@ -3,12 +3,12 @@
     "rss_feeds": [
       "https://techcrunch.com/category/artificial-intelligence/feed/",
       "https://www.theverge.com/rss/ai-artificial-intelligence/index.xml",
-      "https://feeds.technologyreview.com/technologyreview/ai/",
-      "https://venturebeat.com/category/ai/feed/",
+      "https://www.technologyreview.com/topic/artificial-intelligence/feed",
+      "https://venturebeat.com/feed",
       "https://www.wired.com/feed/tag/ai/latest/rss",
-      "https://feeds.arstechnica.com/arstechnica/technology-lab",
-      "https://blog.google/technology/ai/rss/",
-      "https://openai.com/blog/rss.xml",
+      "https://arstechnica.com/ai/feed/",
+      "https://blog.google/innovation-and-ai/technology/ai/rss/",
+      "https://openai.com/news/rss.xml",
       "https://gigazine.net/news/rss_2.0/",
       "https://rss.itmedia.co.jp/rss/2.0/aiplus.xml",
       "https://www.publickey1.jp/atom.xml"
@@ -24,8 +24,10 @@
       ]
     },
     "max_articles": 50,
+    "max_per_feed": 30,
     "top_n": 5,
     "topic_dedup": true,
+    "past_story_dedup": true,
     "exclude_keywords": [],
     "cluster_pool_size": 15,
     "fetch_full_text": true
@@ -57,13 +59,16 @@
     }
   },
   "tts": {
-    "provider": "voicevox",
+    "provider": "gemini",
     "language": "ja-JP",
     "voice": "",
     "speaking_rate": 1.0,
     "pitch": 0.0,
-    "credit": "VOICEVOX:冥鳴ひまり",
+    "credit": "Google Gemini TTS",
     "options": {
+      "model": "gemini-3.8-flash-tts",
+      "voice": "Kore",
+      "style": "bright, friendly, upbeat news explainer, brisk pace",
       "base_url": "http://localhost:50021",
       "speaker": 14
     }
