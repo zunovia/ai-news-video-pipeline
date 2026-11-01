@@ -41,7 +41,7 @@ CAPS = {
 
 
 def render(name: str, out: str, day: str | None = None) -> None:
-    cmd = [sys.executable, "_render_preview.py", "--template", f"templates/candidates/{name}/slide_shorts.html",
+    cmd = [sys.executable, "_render_preview.py", "--template", str(next(p for p in (Path(f"templates/variants/{name}/slide_shorts.html"), Path(f"templates/candidates/{name}/slide_shorts.html")) if p.exists())),
            "--shorts", "--out", out, *DATA]
     if day:
         cmd += ["--day", day]

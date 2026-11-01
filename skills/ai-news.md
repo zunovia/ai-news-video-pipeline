@@ -79,7 +79,7 @@ Applied to EACH per-topic Short (the actual titles are already in the review fil
 - Language ja / Not made for kids / Altered content: No / **Privacy: private** / Playlist: 今日のAIニュース（初心者向け） / no custom thumbnail.
 - Captions: `state/captions/DATE_topic{i}.srt` attached after upload (non-fatal; see `caption_set` in `state/upload_log.json`).
 
-Output files: `output/DATE_shorts_topic1.mp4` … `_topic3.mp4` (slides in `state/images_shorts/`). To eyeball a frame: `ffmpeg -ss 3 -i output/DATE_shorts_topic1.mp4 -frames:v 1 frame.png`. Layout: intro slide = article image + big hook_title; ポイント slide = hook strip + 3 point cards; spoken text burned in as synced ruby captions (rollback: `shorts.burn_captions: false`, old template in `templates/old/pre_captions_20261004/`). Ken Burns motion (`video.motion.enabled`) stays on as the inauthentic-content defense.
+Output files: `output/DATE_shorts_topic1.mp4` … `_topic3.mp4` (slides in `state/images_shorts/`). To eyeball a frame: `ffmpeg -ss 3 -i output/DATE_shorts_topic1.mp4 -frames:v 1 frame.png`. Layout: intro slide = article image + big hook_title; ポイント slide = hook strip + 3 point cards; spoken text burned in as synced ruby captions (rollback: `shorts.burn_captions: false`, old template in `templates/old/pre_captions_20261004/`). Design: each topic video uses one of 3 designs (broadcast / editorial / soft in `templates/variants/<name>/slide_shorts.html`, listed in `shorts.template_variants`), assigned by a date-seeded shuffle so rebuilds keep the same designs; the mapping is saved to `state/ui_variants_DATE.json`. Empty `template_variants` falls back to `templates/slide_shorts.html`. Ken Burns motion (`video.motion.enabled`) stays on as the inauthentic-content defense.
 
 ### Step 7: Ask for upload approval
 

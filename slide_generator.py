@@ -56,6 +56,34 @@ def get_day_class(date_str: str) -> str:
         return "day-mon"
 
 
+def pick_shorts_variants(config: dict, date_key: str) -> list[Path]:
+    """その日の Shorts デザイン（config.shorts.template_variants）を日付で決まる順に並べて返す.
+
+    トピック i は戻り値の (i-1) % len 番目を使う → 3本/日なら A/B/C を1本ずつ、順番はランダム。
+    同じ日付は何度作り直しても同じ順になる（シードは日付）。未設定なら空リスト＝従来の1テンプレ。
+    """
+    import random
+    names = config.get("shorts", {}).get("template_variants") or []
+    templates_dir = Path(config["paths"]["templates_dir"])
+    paths = [templates_dir / name for name in names]
+    missing = [str(p) for p in paths if not p.exists()]
+    if missing:
+        raise FileNotFoundError(f"shorts.template_variants not found: {missing}")
+    random.Random(f"shorts-ui-{date_key}").shuffle(paths)
+    return paths
+
+
+def next_article_index(current: int, title: str) -> int:
+    """ニュース系スライド1枚を処理した後の記事番号（1始まり）を返す.
+
+    紹介スライドで +1、「〜のポイント」は直前の記事の続きなので据え置き。
+    先頭が孤立ポイントの場合は video_builder._group_article_units と同じく1件目の記事として数える。
+    """
+    if title.endswith("ポイント") and current > 0:
+        return current
+    return current + 1
+
+
 def is_friday(date_str: str) -> bool:
     """Check if the given YYYYMMDD date is a Friday."""
     from datetime import datetime
@@ -464,6 +492,12 @@ async def generate_slides_async(
             max_sec = config.get("video", {}).get("shorts_max_duration_sec", 170)
             slides = select_shorts_slides(slides, max_sec)
 
+    # Shorts デザインのランダム割り当て（config.shorts.template_variants、2026-11-01 ユーザー決定）。
+    # per_topic はトピックごとに別デザイン、レガシーは1デッキ1デザイン。プレビュー（template_override）では使わない。
+    variants: list[Path] = []
+    if shorts and template_override is None:
+        variants = pick_shorts_variants(config, config["_date"])
+
     # Load expression images once
     ponte_expressions = _load_ponte_expressions(config)
 
@@ -523,6 +557,7 @@ async def generate_slides_async(
         if classify_slide(s, len(slides)) == "news" and not s["title"].endswith("ポイント")
     )
 
+    used_variants: dict[str, str] = {}
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page(
@@ -533,9 +568,10 @@ async def generate_slides_async(
             slide_type = classify_slide(slide, len(slides))
             if slide_type == "news":
                 news_counter += 1
-                # Odd = intro slide (1,3,5...), even = explanation slide (2,4,6...)
-                if news_counter % 2 == 1:
-                    article_index += 1
+                # 紹介スライドで記事番号を進める（「〜のポイント」は直前の記事の続き）。
+                # 奇数/偶数判定だと、ポイント欠けの記事があると以降の記事番号・デザインがずれる。
+                # video_builder._group_article_units と同じ基準（タイトル末尾「ポイント」）に揃える
+                article_index = next_article_index(article_index, slide["title"])
 
             # Background variant for news slides (cycles through 5 colors)
             bg_variant = f"bg-{(news_counter - 1) % 5 + 1}" if slide_type == "news" else ""
@@ -553,8 +589,14 @@ async def generate_slides_async(
 
             # per_topic モードでは各動画が単体で完結するため、
             # ニュース番号・進捗「n/M」は表示しない（0で非表示）
+            slide_template = template_path
+            if variants:
+                slide_template = (variants[(max(article_index, 1) - 1) % len(variants)]
+                                  if per_topic else variants[0])
+                used_variants[str(max(article_index, 1))] = slide_template.parent.name
+
             html = render_slide_html(
-                slide, slide_type, template_path, config,
+                slide, slide_type, slide_template, config,
                 0 if per_topic else article_index,
                 index_items=news_titles if slide_type == "index" else None,
                 keyword_items=kw_items,
@@ -575,6 +617,12 @@ async def generate_slides_async(
             logger.info("Generated slide: %s", output_path)
 
         await browser.close()
+
+    # どのトピックがどのデザインだったか（週次レビューで再生数と突き合わせる用）
+    if used_variants and out_subdir is None:
+        variants_path = state_dir / f"{news_json_path.stem.replace('news_', 'ui_variants_', 1)}.json"
+        variants_path.write_text(json.dumps(used_variants, ensure_ascii=False, indent=2), encoding="utf-8")
+        logger.info("Shorts designs: %s -> %s", used_variants, variants_path.name)
 
     logger.info("Generated %d slides in %s", len(slides), images_dir)
     return images_dir

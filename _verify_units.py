@@ -1508,6 +1508,50 @@ _cn_md = Path("skills/custom-news.md").read_text(encoding="utf-8")
 check("skills/custom-news.md: カスタムトピックの state は pipeline_DATE_<slug>.json 表記",
       "pipeline_DATE_<slug>.json" in _cn_md.splitlines()[42] and "pipeline_DATE_<slug>.json" in _cn_md.splitlines()[45])
 
+# --- Shorts デザインのランダム割り当て（2026-11-01: A/B/C を記事ごとに） ---
+import slide_generator as _sgv
+_vcfg = json.loads(Path("config.json").read_text(encoding="utf-8"))
+_names = _vcfg["shorts"]["template_variants"]
+check("デザイン: config に A/B/C の3案", len(_names) == 3 and all((Path("templates") / n).exists() for n in _names))
+_v1 = _sgv.pick_shorts_variants(_vcfg, "20261102")
+check("デザイン: 3案すべてを1回ずつ使う（3本/日で重複なし）",
+      sorted(p.parent.name for p in _v1) == ["broadcast", "editorial", "soft"])
+check("デザイン: 同じ日付は何度作り直しても同じ順", _v1 == _sgv.pick_shorts_variants(_vcfg, "20261102"))
+_orders = {tuple(p.parent.name for p in _sgv.pick_shorts_variants(_vcfg, f"202611{d:02d}")) for d in range(1, 29)}
+check("デザイン: 日によって順番が変わる（ランダム）", len(_orders) >= 4, repr(len(_orders)))
+check("デザイン: 未設定なら空（従来の slide_shorts.html）",
+      _sgv.pick_shorts_variants({**_vcfg, "shorts": {}}, "20261102") == [])
+try:
+    _sgv.pick_shorts_variants({**_vcfg, "shorts": {"template_variants": ["variants/nope/slide_shorts.html"]}}, "20261102")
+    check("デザイン: 存在しないテンプレートは即エラー", False)
+except FileNotFoundError:
+    check("デザイン: 存在しないテンプレートは即エラー", True)
+for _n in _names:
+    _t = (Path("templates") / _n).read_text(encoding="utf-8")
+    check(f"デザイン: {_n} に7曜日の色", all(f".day-{d}" in _t for d in ("mon", "tue", "wed", "thu", "fri", "sat", "sun")))
+
+# --- 回帰: ポイント欠けの記事があっても記事番号（og_image/hook_title/points/デザイン）がずれない ---
+from video_builder import select_topic_units as _stu2
+def _mk(n, title):
+    return {"number": n, "title": title, "serif": "x", "body": "", "is_opening": False,
+            "is_ending": False, "is_index": False, "is_keyword": False}
+_sl = [_mk(1, "記事A"), _mk(2, "記事Aのポイント"), _mk(3, "記事B"),   # B はポイント欠け
+       _mk(4, "記事C"), _mk(5, "記事Cのポイント"), _mk(6, "記事D"), _mk(7, "記事Dのポイント")]
+_units = _stu2(_sl, 3)
+_idx, _cur = {}, 0
+for _s in _sl:
+    _cur = _sgv.next_article_index(_cur, _s["title"])
+    _idx[_s["number"]] = _cur
+check("記事番号: ポイント欠けでも後続がずれない", _idx == {1: 1, 2: 1, 3: 2, 4: 3, 5: 3, 6: 4, 7: 4}, repr(_idx))
+check("記事番号: select_topic_units のユニット順と一致",
+      all(_idx[s["number"]] == i for i, u in enumerate(_units, 1) for s in u), repr(_idx))
+_vv = _sgv.pick_shorts_variants(_vcfg, "20261102")
+_assign = [_vv[(_idx[u[0]["number"]] - 1) % len(_vv)].parent.name for u in _units]
+check("デザイン: 3ユニットで A/B/C を1回ずつ（ポイント欠け含む）",
+      sorted(_assign) == ["broadcast", "editorial", "soft"], repr(_assign))
+check("記事番号: 先頭が孤立ポイントでも1件目として数える（ユニット化と同じ）",
+      _sgv.next_article_index(0, "記事Zのポイント") == 1 and _sgv.next_article_index(1, "記事Zのポイント") == 1)
+
 print()
 if failures:
     print(f"=== {len(failures)} FAILURES: {failures}")
