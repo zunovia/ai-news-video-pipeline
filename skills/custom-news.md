@@ -106,7 +106,7 @@ The preflight runs first; if it reports a FAIL (title with reading parentheses, 
 
 Show the upload results (video URLs, `caption_set`). If an upload fails, show the error and ask the user how to proceed.
 
-Then do the **Studio finishing** exactly as in `/ai-news` Step 9 (Claude in Chrome: 関連動画 = the most recent earlier upload with the same topic number in `state/upload_log.json`, サムネイル = 「動画から選択」 leftmost frame, 「保存」; never touch 公開設定), and include its result in the report.
+**Approval flow is kept for /custom-news** (the seamless no-approval mode is a /ai-news-only user decision, 2026-11-06). After the approved upload, do the **Studio finishing** exactly as in `/ai-news` Step 9 (Claude in Chrome): 関連動画 = the entry in `state/upload_log.json` with the latest date earlier than DATE, the same `kind` (`shorts_topic{i}`) and the **same playlist** (今日のTOPICニュース（初心者向け）) — skip if none; サムネイル = 「動画から選択」 leftmost frame; 字幕 = caption editor 「完了」 (skip and report if `caption_set: false`); 字幕の認定 = 「このコンテンツは米国内のテレビで放送されたことはありません。」; 「保存」; then check 有料プロモーション 「いいえ」. Never touch 公開設定. Report the upload results and the finishing result together.
 
 ## Examples
 

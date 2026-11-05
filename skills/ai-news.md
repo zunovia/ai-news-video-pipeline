@@ -83,7 +83,7 @@ Applied to EACH per-topic Short (the actual titles are already in the review fil
 - Thumbnail: **set in Studio by Step 9** (「動画から選択」→ leftmost frame). The API route (`thumbnails.set`, `youtube.custom_thumbnail`) returns success but has **no effect on Shorts** — Studio keeps its auto frame (verified 2026-11-06), so `custom_thumbnail` is `false`.
 - Captions: `state/captions/DATE_topic{i}.srt` attached after upload as a published (non-draft) track (non-fatal; see `caption_set`).
 - After upload the settings are read back from the API into `upload_log.json` → `readback` (`default_language`, `audio_language`, `paid_product_placement`, `caption_tracks`). Report anything that is not `ja` / `false` / a non-draft `ja` track.
-- **Not automatable via API:** related video (「関連動画」 — no field in the Video resource/discovery schema; done in Step 9 via Chrome) and caption certification (「字幕の認定」= never aired on US TV) — the YouTube Data API has no field for it (checked 2026-11-06 in the videos/captions reference). It is optional and only matters for content that aired on US TV; the user can set it in Studio when publishing if they wish.
+- **Not automatable via API (done in Step 9 via Chrome):** related video (「関連動画」 — no field in the Video resource/discovery schema), 字幕 ON (the user confirms the track with 「完了」 in the caption editor), and caption certification (「字幕の認定」= never aired on US TV) — the YouTube Data API has no field for it (checked 2026-11-06 in the videos/captions reference). The user sets it on every Short (user request 2026-11-06), so Step 9 selects 「このコンテンツは米国内のテレビで放送されたことはありません。」.
 
 Output files: `output/DATE_shorts_topic1.mp4` … `_topic3.mp4` (slides in `state/images_shorts/`). To eyeball a frame: `ffmpeg -ss 3 -i output/DATE_shorts_topic1.mp4 -frames:v 1 frame.png`. Layout: intro slide = article image + big hook_title; ポイント slide = hook strip + 3 point cards; spoken text burned in as synced ruby captions (rollback: `shorts.burn_captions: false`, old template in `templates/old/pre_captions_20261004/`). Design: each topic video uses one of 3 designs (broadcast / editorial / soft in `templates/variants/<name>/slide_shorts.html`, listed in `shorts.template_variants`), assigned by a date-seeded shuffle so rebuilds keep the same designs; the mapping is saved to `state/ui_variants_DATE.json`. Empty `template_variants` falls back to `templates/slide_shorts.html`. Ken Burns motion (`video.motion.enabled`) stays on as the inauthentic-content defense.
 
@@ -105,10 +105,12 @@ Then run Step 9. Final report (one message, after Step 9): what was fixed (befor
 
 The API cannot set these, so do them in the user's Chrome (load the `claude-in-chrome` skill; one new tab; close it at the end). For each uploaded topic i of DATE (video ids from `state/upload_log.json`):
 1. Open `https://studio.youtube.com/video/<id>/edit`, wait ~4 s.
-2. **関連動画**: click the 「関連動画」 button → in 「特定の動画の選択」 pick **the previous upload day's video with the same topic number** (user decision: 「前日の同じ番号の動画」; take its title from the latest earlier date in `upload_log.json`, kind `shorts_topic{i}`; titles are truncated in the grid, match the start).
+2. **関連動画**: click the 「関連動画」 button → in 「特定の動画の選択」 pick **the previous upload day's video with the same topic number** (user decision: 「前日の同じ番号の動画」 = in `upload_log.json`, the entry with the **latest date earlier than DATE** whose `kind` is `shorts_topic{i}` and whose `playlist` is 「今日のAIニュース（初心者向け）」; titles are truncated in the grid, match the start). If no such entry exists, skip this item and say so in the report.
 3. **サムネイル**: hover the thumbnail → ⋮ → 「動画から選択」 → click the **leftmost** frame (intro screen: article photo + big hook title) → 「完了」.
+3a. **字幕 ON**: in the right panel click the pencil of 「字幕」 → the 日本語 caption editor opens (our uploaded SRT) → click 「完了」 (not 「ドラフトを保存」). Do not edit the text. If the video has no caption track (`caption_set: false`), skip this item and report it.
+3b. **字幕の認定**: click 「すべて表示」 → section 「言語とキャプションの認定」 → dropdown 「字幕の認定」 (default 「なし」) → choose 「このコンテンツは米国内のテレビで放送されたことはありません。」. Also check 「動画の言語」 and 「タイトルと説明の言語」 both show 日本語.
 4. Click 「保存」 and confirm the toast 「変更を保存しました」.
-5. Optional check: 「すべて表示」 → 有料プロモーション shows 「いいえ」 selected.
+5. After saving, check (same 「すべて表示」 area): 有料プロモーション shows 「いいえ、この動画には有料プロモーションは含まれていません」 selected — if not, select it and save again.
 Never touch 公開設定 (the user publishes; a video may already be public if the user published it in the meantime — leave it). If Studio's layout differs or a step fails twice, stop, report which video/step, and leave the rest for the user (list the related-video titles to pick).
 
 ## Ponte character assets
