@@ -85,7 +85,7 @@ Applied to EACH per-topic Short (the actual titles are already in the review fil
 - Title: `{hook_title} #ai #news #shorts #short #{関連1} #{関連2}` — fixed 4 hashtags + up to 2 related tags (entities, then `_JA_TOPIC_TAGS` in the hook/article title) — add new product names to `youtube_uploader._KNOWN_ENTITIES`. Reading parentheses are stripped from titles at upload as a second safeguard.
 - Description: hook + summary (sentence-boundary cut) + 元記事 link + site link, ending `運営： https://surc.online/`. No VOICEVOX credit line, no trailing hashtag line (user decision 2026-07-24).
 - Tags: TOPIC + entities + `_JA_TOPIC_TAGS` + adult-beginner base set, max 15, no 小学生/中学生.
-- Language ja / Not made for kids / Altered content: No / **Privacy: private** / Playlist: 今日のTOPICニュース（初心者向け） / thumbnail = intro frame (`youtube.thumbnail_time_sec`, auto-set since 2026-11-06) / title gets up to 2 related hashtags after the fixed 4 (`youtube.title_extra_hashtags`).
+- Language ja / Not made for kids / Altered content: No / **Privacy: private** / Playlist: 今日のTOPICニュース（初心者向け） / thumbnail + related video = set in Studio via Chrome (see ai-news Step 9; the API thumbnail has no effect on Shorts) / paid promotion = No set explicitly after upload / title gets up to 2 related hashtags after the fixed 4 (`youtube.title_extra_hashtags`).
 - Captions: `state/captions/DATE_topic{i}.srt` attached after upload (non-fatal; see `caption_set` in `state/upload_log.json`).
 
 Output files: `output/DATE_shorts_topic1.mp4` … `_topic3.mp4` (slides in `state/images_shorts/`). To eyeball a frame: `ffmpeg -ss 3 -i output/DATE_shorts_topic1.mp4 -frames:v 1 frame.png`. Layout: intro slide = article image + big hook_title; ポイント slide = hook strip + 3 point cards; spoken text burned in as synced ruby captions (rollback: `shorts.burn_captions: false`, old template in `templates/old/pre_captions_20261004/`). Design: each topic video uses one of 3 designs (broadcast / editorial / soft in `templates/variants/<name>/slide_shorts.html`, listed in `shorts.template_variants`), assigned by a date-seeded shuffle so rebuilds keep the same designs; the mapping is saved to `state/ui_variants_DATE.json`. Empty `template_variants` falls back to `templates/slide_shorts.html`. Ken Burns motion (`video.motion.enabled`) stays on as the inauthentic-content defense.
@@ -105,6 +105,8 @@ cd C:/02.Claude_Agent/912-plan && python orchestrator.py --date DATE --step uplo
 The preflight runs first; if it reports a FAIL (title with reading parentheses, missing video, over 3 minutes, title over 100 chars, empty title) the upload is aborted with the reason — fix it via Step 4 and retry. Then all `DATE_shorts_topic*.mp4` are uploaded with their hook titles (`youtube_uploader.upload_topic_shorts()`), results appended to `state/upload_log.json`.
 
 Show the upload results (video URLs, `caption_set`). If an upload fails, show the error and ask the user how to proceed.
+
+Then do the **Studio finishing** exactly as in `/ai-news` Step 9 (Claude in Chrome: 関連動画 = the most recent earlier upload with the same topic number in `state/upload_log.json`, サムネイル = 「動画から選択」 leftmost frame, 「保存」; never touch 公開設定), and include its result in the report.
 
 ## Examples
 

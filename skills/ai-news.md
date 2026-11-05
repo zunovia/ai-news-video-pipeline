@@ -79,11 +79,11 @@ Applied to EACH per-topic Short (the actual titles are already in the review fil
 - Title: `{hook_title} #ai #news #shorts #short #{関連1} #{関連2}` — fixed 4 hashtags + up to `youtube.title_extra_hashtags` (2) related tags: entities from `youtube_uploader._KNOWN_ENTITIES` first, then `_JA_TOPIC_TAGS` found in the hook / article title (e.g. `#ChatGPT #Google`, `#AIエージェント #セキュリティ`). This automates the tags the user used to add by hand in Studio (2026-11-06). If a topic gets no related tag because a product name is missing, add it to `_KNOWN_ENTITIES`. Related tags are dropped from the end if the title would exceed 100 chars. Reading parentheses are stripped from titles at upload as a second safeguard.
 - Description: hook + summary (sentence-boundary cut) + 元記事 link + site link, ending `運営： https://surc.online/`. No VOICEVOX credit line, no trailing hashtag line (user decision 2026-07-24).
 - Tags: entities + `_JA_TOPIC_TAGS` + adult-beginner base set, max 15, no 小学生/中学生.
-- Language ja (title/description language `defaultLanguage` + video language `defaultAudioLanguage`) / Not made for kids / Altered content: No / Paid promotion: No (API default `hasPaidProductPlacement: false`) / **Privacy: private** (user publishes manually) / Playlist: 今日のAIニュース（初心者向け）.
-- Thumbnail: the frame at `youtube.thumbnail_time_sec` (0.2 s = intro screen with article photo + big hook title, before captions appear) is saved to `state/thumbnails/DATE_topic{i}.jpg` and set with `thumbnails.set` (non-fatal; `thumbnail_set` in the log). Replaces the user's manual "pick the leftmost candidate" step.
+- Language ja (title/description language `defaultLanguage` + video language `defaultAudioLanguage`) / Not made for kids / Altered content: No / Paid promotion: No — set explicitly by `videos.update(part=paidProductPlacementDetails)` after upload (the API default alone left the Studio radio unselected; the explicit update makes Studio show 「いいえ、この動画には有料プロモーションは含まれていません」, verified 2026-11-06) / **Privacy: private** (user publishes manually) / Playlist: 今日のAIニュース（初心者向け）.
+- Thumbnail: **set in Studio by Step 9** (「動画から選択」→ leftmost frame). The API route (`thumbnails.set`, `youtube.custom_thumbnail`) returns success but has **no effect on Shorts** — Studio keeps its auto frame (verified 2026-11-06), so `custom_thumbnail` is `false`.
 - Captions: `state/captions/DATE_topic{i}.srt` attached after upload as a published (non-draft) track (non-fatal; see `caption_set`).
 - After upload the settings are read back from the API into `upload_log.json` → `readback` (`default_language`, `audio_language`, `paid_product_placement`, `caption_tracks`). Report anything that is not `ja` / `false` / a non-draft `ja` track.
-- **Not automatable via API:** caption certification (「字幕の認定」= never aired on US TV) — the YouTube Data API has no field for it (checked 2026-11-06 in the videos/captions reference). It is optional and only matters for content that aired on US TV; the user can set it in Studio when publishing if they wish.
+- **Not automatable via API:** related video (「関連動画」 — no field in the Video resource/discovery schema; done in Step 9 via Chrome) and caption certification (「字幕の認定」= never aired on US TV) — the YouTube Data API has no field for it (checked 2026-11-06 in the videos/captions reference). It is optional and only matters for content that aired on US TV; the user can set it in Studio when publishing if they wish.
 
 Output files: `output/DATE_shorts_topic1.mp4` … `_topic3.mp4` (slides in `state/images_shorts/`). To eyeball a frame: `ffmpeg -ss 3 -i output/DATE_shorts_topic1.mp4 -frames:v 1 frame.png`. Layout: intro slide = article image + big hook_title; ポイント slide = hook strip + 3 point cards; spoken text burned in as synced ruby captions (rollback: `shorts.burn_captions: false`, old template in `templates/old/pre_captions_20261004/`). Design: each topic video uses one of 3 designs (broadcast / editorial / soft in `templates/variants/<name>/slide_shorts.html`, listed in `shorts.template_variants`), assigned by a date-seeded shuffle so rebuilds keep the same designs; the mapping is saved to `state/ui_variants_DATE.json`. Empty `template_variants` falls back to `templates/slide_shorts.html`. Ken Burns motion (`video.motion.enabled`) stays on as the inauthentic-content defense.
 
@@ -99,7 +99,17 @@ cd C:/02.Claude_Agent/912-plan && python orchestrator.py --date DATE --step uplo
 
 The preflight runs first; if it reports a FAIL (title with reading parentheses, missing video, over 3 minutes, title over 100 chars, empty title) the upload is aborted with the reason — fix it via Step 4 and retry. Then all `DATE_shorts_topic*.mp4` are uploaded with their hook titles (`youtube_uploader.upload_topic_shorts()`), results appended to `state/upload_log.json`.
 
-Final report (one message): what was fixed (before → after, with source quotes for your own findings), the uploaded titles + URLs, `thumbnail_set` / `caption_set` / `readback` per video, any remaining WARN, and a reminder that the videos are private and need 「公開」 in Studio. If an upload fails, show the error and ask the user how to proceed.
+Then run Step 9. Final report (one message, after Step 9): what was fixed (before → after, with source quotes for your own findings), the uploaded titles + URLs, `caption_set` / `readback` per video, the Step 9 result (related video + thumbnail per video), any remaining WARN, and a reminder that the videos are private and need 「公開」 in Studio. If an upload fails, show the error and ask the user how to proceed.
+
+### Step 9: Studio finishing via Claude in Chrome (user decision 2026-11-06)
+
+The API cannot set these, so do them in the user's Chrome (load the `claude-in-chrome` skill; one new tab; close it at the end). For each uploaded topic i of DATE (video ids from `state/upload_log.json`):
+1. Open `https://studio.youtube.com/video/<id>/edit`, wait ~4 s.
+2. **関連動画**: click the 「関連動画」 button → in 「特定の動画の選択」 pick **the previous upload day's video with the same topic number** (user decision: 「前日の同じ番号の動画」; take its title from the latest earlier date in `upload_log.json`, kind `shorts_topic{i}`; titles are truncated in the grid, match the start).
+3. **サムネイル**: hover the thumbnail → ⋮ → 「動画から選択」 → click the **leftmost** frame (intro screen: article photo + big hook title) → 「完了」.
+4. Click 「保存」 and confirm the toast 「変更を保存しました」.
+5. Optional check: 「すべて表示」 → 有料プロモーション shows 「いいえ」 selected.
+Never touch 公開設定 (the user publishes; a video may already be public if the user published it in the meantime — leave it). If Studio's layout differs or a step fails twice, stop, report which video/step, and leave the rest for the user (list the related-video titles to pick).
 
 ## Ponte character assets
 
@@ -143,7 +153,7 @@ Source files (do not use directly in pipeline):
 | `script.factcheck.enabled` | `true` | Separate fact-check LLM after script generation (2026-10-23). `false` = skip (review file then says 記録なし) |
 | `script.factcheck.auto_fix` | `true` | Apply the verifier's fixes for clear errors. `false` = report only (all findings become 要確認) |
 | `tts.provider` / `tts.options.voice` | `gemini` / `Kore` | Voice (2026-11-01). `tts.options.style` = speaking style (English, in speech_metadata — never put instructions in the text, they get read aloud) |
-| `youtube.custom_thumbnail` | `true` | Set the intro frame as thumbnail on each Short (2026-11-06). `false` = Studio auto thumbnail |
+| `youtube.custom_thumbnail` | `false` | API thumbnail upload (`thumbnails.set`). Off since 2026-11-06: it has no effect on Shorts — the thumbnail is picked in Studio (Step 9) |
 | `youtube.thumbnail_time_sec` | `0.2` | Which second of the video becomes the thumbnail (before captions appear) |
 | `youtube.title_extra_hashtags` | `2` | Related hashtags appended after the fixed 4 (`0` = old behavior without related tags) |
 | `tts.credit` | `Google Gemini TTS` | Credit line — since 2026-07-24 only used by the disabled 16:9 daily / digest-Shorts descriptions (removed from per-topic Shorts by user decision) |

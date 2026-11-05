@@ -521,6 +521,18 @@ def upload_video(
     if playlist_name:
         _add_to_playlist(service, video_id, playlist_name)
 
+    # 有料プロモーション「いいえ」を明示して保存する（API既定値の false だけでは
+    # Studio のラジオボタンが未選択のまま＝ユーザーが手で選んでいた。2026-11-06）。
+    # insert の part には入れず別呼び出しにする（失敗してもアップロードは成功扱い）
+    try:
+        service.videos().update(
+            part="paidProductPlacementDetails",
+            body={"id": video_id,
+                  "paidProductPlacementDetails": {"hasPaidProductPlacement": False}},
+        ).execute()
+    except Exception as e:
+        logger.warning("Failed to set paid product placement = No (upload still OK): %s", e)
+
     # 設定が実際に入ったかを読み戻す（Studio で手確認していた項目）
     readback = _readback_video(service, video_id)
 
@@ -726,7 +738,8 @@ def upload_topic_shorts(
         metadata = generate_topic_shorts_metadata(
             date_str, config, article, hook, i, topic=topic)
         # サムネイル: 動画の最初の画面（記事の写真＋大見出し、字幕が出る前）。
-        # Studio で「1番左の候補」を手で選んでいた分の自動化（2026-11-06）
+        # 既定は無効（youtube.custom_thumbnail=false）: thumbnails.set は Shorts に効かないため、
+        # サムネは /ai-news Step 9 で Studio の「動画から選択」→1番左を選ぶ（2026-11-06 実機確認）
         if config.get("youtube", {}).get("custom_thumbnail", False):
             thumb = make_topic_thumbnail(
                 video_path, state_dir / "thumbnails" / f"{date_str}_topic{i}.jpg",

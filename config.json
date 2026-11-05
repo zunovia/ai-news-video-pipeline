@@ -113,7 +113,7 @@
     "default_category_id": "28",
     "default_tags": ["AI", "人工知能", "AIニュース", "生成AI", "AI活用", "AI入門", "初心者", "ポンテ", "AI教室"],
     "initial_privacy": "private",
-    "custom_thumbnail": true,
+    "custom_thumbnail": false,
     "thumbnail_time_sec": 0.2,
     "title_extra_hashtags": 2
   },
