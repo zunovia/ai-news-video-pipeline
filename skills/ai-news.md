@@ -10,6 +10,8 @@ All commands MUST run with working directory `C:/02.Claude_Agent/912-plan/`.
 
 **Build flow (updated 2026-10-23):** the pipeline now self-checks before you review. Script is generated only for the top N articles → only the broken fields are repaired (no full regeneration) → a separate fact-check LLM compares title/serif/points with the source and auto-fixes clear errors → videos are built → `state/review_DATE.md` collects everything you need to review in one file → `upload_shorts` refuses to upload if the preflight has a FAIL. Your job is to read the review file, decide fixes, and apply them with one command.
 
+**Seamless mode (user decision 2026-11-06 — always follow):** do NOT present A/B/C options and do NOT ask for upload approval. The flow is always: build → review (Step 3) → **apply every fix you found (= option A) automatically** (Step 4) → re-check the new review file → **upload as private automatically** (Step 8) → report. The upload is private; the user presses "公開" in YouTube Studio themselves (user decision 2026-11-06: 「非公開で上げて、公開は手動」). Stop and ask the user only when: the date was already uploaded (check `state/upload_log.json` / `state/old` first), the pipeline fails, the script is `fallback`, `review_apply.py` still reports a FAIL after one retry, or a fix needs information you cannot verify (say so instead of guessing).
+
 ### Step 1: Determine date
 
 If the user specified a date, use it in YYYYMMDD format.
@@ -40,11 +42,11 @@ What happens automatically (no manual step needed):
 
 Read `C:/02.Claude_Agent/912-plan/state/review_DATE.md` (one file: YouTube title per topic, on-screen points, serif, source summary + facts, fact-check fixes and 要確認 items, video length, caption status, preflight results). Regenerate it any time with `PYTHONIOENCODING=utf-8 python review_report.py DATE`.
 
-Then report to the user:
+Check (and later report) the following — do not stop to ask between steps:
 1. **Preflight**: list every FAIL (blocks upload) and WARN. Typical WARNs: `元記事にない数字` (a number in title/points/serif that is not in the source — check it), `題名が途中で切れている疑い`, `画面の要点が3個でない`, `事実確認の未解決`, `金額の桁ずれの疑い（英語原文と比較）` (a dollar amount that is exactly 10/100/1000x smaller than the English original, e.g. `$740 billion` written as `740億ドル` — always fix it; since 2026-11-01 the collector auto-corrects these in summaries/facts and lists them in the review file as `金額の桁を英語原文に合わせて自動修正`).
 2. **Fact-check result**: show what was auto-fixed (before → after) so the user knows the titles changed, and every 要確認 item with its suggestion.
 3. **Your own check** — the verifier is an LLM and can miss things, so still read each topic's title / points / serif against the source facts yourself. Watch for: **hook titles that end mid-word or are not a complete statement** (e.g. `…で首`, `…立ち上`; the preflight only catches particle endings — propose a fixed version ≤26 chars), number-target swaps ("500万行を分析し493件" → "500万行のバグ"), research results turned into "治療法" or "実用化", ranges stated as a single value ("数カ月〜1年" → "1年"), limited releases described as generally available, wrong company names, accounting terms mistranslated (negative free cash flow / spending called `赤字`), group totals stated as one company's figure. For large dollar amounts (≥100億ドル) open the English original (WebFetch) and check billion→億 (1 billion = 10億).
-4. Present the fixes together with options (A: fix all and rebuild / B: titles only / C: upload as-is).
+4. **Apply all fixes immediately (always option A — no A/B/C question).** Include the verifier's 要確認 suggestions when the source supports them, plus every problem you found yourself. If nothing needs fixing, skip Step 4 and go straight to Step 8.
 
 If `script_meta_DATE.json` has `"source": "fallback"`, the LLM script failed (canned phrases) — show its `error` and offer `python orchestrator.py --date DATE --skip-upload --from script`.
 
@@ -64,7 +66,8 @@ cd C:/02.Claude_Agent/912-plan && PYTHONIOENCODING=utf-8 python review_apply.py 
 ```
 - `titles` / `points`: keys are topic numbers (1-based). Reading parentheses are stripped automatically; titles must be ≤26 chars.
 - `serif.old` must appear **exactly once** in `state/script_DATE.md` — copy it from the file including its ruby, e.g. `人間(にんげん)なら1年`. `serif.new` can be written without kanji ruby (added automatically); keep English readings like `OpenAI(オープンエーアイ)` if you write English words.
-- Exit code 2 = fixes rejected (message says why, files untouched); 1 = rebuilt but preflight still has a FAIL.
+- Exit code 2 = fixes rejected (message says why, files untouched) — fix the JSON yourself and rerun (e.g. points must be ≤20 chars each); 1 = rebuilt but preflight still has a FAIL.
+- After it succeeds, read the new `state/review_DATE.md` once more (FAIL 0 / your fixes reflected / no new WARN) and continue to Step 8 without asking.
 
 ### Step 5: Ruby (furigana) review
 
@@ -73,21 +76,22 @@ Check the serif ruby in the review file. Formats: `漢字(ふりがな)`, `挑�
 ### Step 6: YouTube settings (for reference)
 
 Applied to EACH per-topic Short (the actual titles are already in the review file):
-- Title: `{hook_title} #ai #news #shorts #short #{エンティティ}` — fixed 4 hashtags + up to 1 search entity (#ChatGPT / #OpenAI …) from `youtube_uploader._KNOWN_ENTITIES` (add new product names there). Reading parentheses are stripped from titles at upload as a second safeguard.
+- Title: `{hook_title} #ai #news #shorts #short #{関連1} #{関連2}` — fixed 4 hashtags + up to `youtube.title_extra_hashtags` (2) related tags: entities from `youtube_uploader._KNOWN_ENTITIES` first, then `_JA_TOPIC_TAGS` found in the hook / article title (e.g. `#ChatGPT #Google`, `#AIエージェント #セキュリティ`). This automates the tags the user used to add by hand in Studio (2026-11-06). If a topic gets no related tag because a product name is missing, add it to `_KNOWN_ENTITIES`. Related tags are dropped from the end if the title would exceed 100 chars. Reading parentheses are stripped from titles at upload as a second safeguard.
 - Description: hook + summary (sentence-boundary cut) + 元記事 link + site link, ending `運営： https://surc.online/`. No VOICEVOX credit line, no trailing hashtag line (user decision 2026-07-24).
 - Tags: entities + `_JA_TOPIC_TAGS` + adult-beginner base set, max 15, no 小学生/中学生.
-- Language ja / Not made for kids / Altered content: No / **Privacy: private** / Playlist: 今日のAIニュース（初心者向け） / no custom thumbnail.
-- Captions: `state/captions/DATE_topic{i}.srt` attached after upload (non-fatal; see `caption_set` in `state/upload_log.json`).
+- Language ja (title/description language `defaultLanguage` + video language `defaultAudioLanguage`) / Not made for kids / Altered content: No / Paid promotion: No (API default `hasPaidProductPlacement: false`) / **Privacy: private** (user publishes manually) / Playlist: 今日のAIニュース（初心者向け）.
+- Thumbnail: the frame at `youtube.thumbnail_time_sec` (0.2 s = intro screen with article photo + big hook title, before captions appear) is saved to `state/thumbnails/DATE_topic{i}.jpg` and set with `thumbnails.set` (non-fatal; `thumbnail_set` in the log). Replaces the user's manual "pick the leftmost candidate" step.
+- Captions: `state/captions/DATE_topic{i}.srt` attached after upload as a published (non-draft) track (non-fatal; see `caption_set`).
+- After upload the settings are read back from the API into `upload_log.json` → `readback` (`default_language`, `audio_language`, `paid_product_placement`, `caption_tracks`). Report anything that is not `ja` / `false` / a non-draft `ja` track.
+- **Not automatable via API:** caption certification (「字幕の認定」= never aired on US TV) — the YouTube Data API has no field for it (checked 2026-11-06 in the videos/captions reference). It is optional and only matters for content that aired on US TV; the user can set it in Studio when publishing if they wish.
 
 Output files: `output/DATE_shorts_topic1.mp4` … `_topic3.mp4` (slides in `state/images_shorts/`). To eyeball a frame: `ffmpeg -ss 3 -i output/DATE_shorts_topic1.mp4 -frames:v 1 frame.png`. Layout: intro slide = article image + big hook_title; ポイント slide = hook strip + 3 point cards; spoken text burned in as synced ruby captions (rollback: `shorts.burn_captions: false`, old template in `templates/old/pre_captions_20261004/`). Design: each topic video uses one of 3 designs (broadcast / editorial / soft in `templates/variants/<name>/slide_shorts.html`, listed in `shorts.template_variants`), assigned by a date-seeded shuffle so rebuilds keep the same designs; the mapping is saved to `state/ui_variants_DATE.json`. Empty `template_variants` falls back to `templates/slide_shorts.html`. Ken Burns motion (`video.motion.enabled`) stays on as the inauthentic-content defense.
 
-### Step 7: Ask for upload approval
+### Step 7: (removed 2026-11-06) No upload approval question
 
-Ask: "Upload all N topic Shorts to YouTube? (yes/no)" — mention any remaining WARN items in the same message.
+The user chose seamless mode: upload as **private** without asking (they publish manually in Studio). Never change the privacy to public automatically. If any WARN remains that you could not resolve, still upload privately and list the WARN in the final report so the user sees it before publishing.
 
-Do NOT upload without explicit user approval.
-
-### Step 8: Upload (if approved)
+### Step 8: Upload (automatic, private)
 
 ```
 cd C:/02.Claude_Agent/912-plan && python orchestrator.py --date DATE --step upload_shorts
@@ -95,7 +99,7 @@ cd C:/02.Claude_Agent/912-plan && python orchestrator.py --date DATE --step uplo
 
 The preflight runs first; if it reports a FAIL (title with reading parentheses, missing video, over 3 minutes, title over 100 chars, empty title) the upload is aborted with the reason — fix it via Step 4 and retry. Then all `DATE_shorts_topic*.mp4` are uploaded with their hook titles (`youtube_uploader.upload_topic_shorts()`), results appended to `state/upload_log.json`.
 
-Show the upload results (video URLs, `caption_set`). If an upload fails, show the error and ask the user how to proceed.
+Final report (one message): what was fixed (before → after, with source quotes for your own findings), the uploaded titles + URLs, `thumbnail_set` / `caption_set` / `readback` per video, any remaining WARN, and a reminder that the videos are private and need 「公開」 in Studio. If an upload fails, show the error and ask the user how to proceed.
 
 ## Ponte character assets
 
@@ -139,4 +143,7 @@ Source files (do not use directly in pipeline):
 | `script.factcheck.enabled` | `true` | Separate fact-check LLM after script generation (2026-10-23). `false` = skip (review file then says 記録なし) |
 | `script.factcheck.auto_fix` | `true` | Apply the verifier's fixes for clear errors. `false` = report only (all findings become 要確認) |
 | `tts.provider` / `tts.options.voice` | `gemini` / `Kore` | Voice (2026-11-01). `tts.options.style` = speaking style (English, in speech_metadata — never put instructions in the text, they get read aloud) |
+| `youtube.custom_thumbnail` | `true` | Set the intro frame as thumbnail on each Short (2026-11-06). `false` = Studio auto thumbnail |
+| `youtube.thumbnail_time_sec` | `0.2` | Which second of the video becomes the thumbnail (before captions appear) |
+| `youtube.title_extra_hashtags` | `2` | Related hashtags appended after the fixed 4 (`0` = old behavior without related tags) |
 | `tts.credit` | `Google Gemini TTS` | Credit line — since 2026-07-24 only used by the disabled 16:9 daily / digest-Shorts descriptions (removed from per-topic Shorts by user decision) |

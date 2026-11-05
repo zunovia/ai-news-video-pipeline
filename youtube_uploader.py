@@ -110,12 +110,14 @@ _KNOWN_ENTITIES = {
     "faceid": "FaceID", "whisper": "Whisper", "genspark": "Genspark",
     "qwen": "Qwen", "minimax": "MiniMax", "gemma": "Gemma", "veo": "Veo",
     "suno": "Suno", "huggingface": "HuggingFace", "groq": "Groq", "manus": "Manus",
+    "wikipedia": "Wikipedia", "marvell": "Marvell", "bing": "Bing", "chrome": "Chrome",
 }
 
 # 日本語のジャンル語（タイトル・要約に含まれていたらtagsに追加）
 _JA_TOPIC_TAGS = [
     "生成AI", "画像生成", "動画生成", "AIエージェント", "自動運転", "ロボット",
     "スマートスピーカー", "音声認識", "半導体", "セキュリティ", "医療", "教育",
+    "AIモデル",
 ]
 
 _ENTITY_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9\.\-]*")
@@ -160,6 +162,11 @@ def extract_entity_keywords(*texts: str, limit: int = 4) -> list[str]:
             if len(found) >= limit:
                 break
     return found
+
+
+def _hashtag_safe(tag: str) -> str:
+    """ハッシュタグとして使えない文字（空白・記号）を落とす（#Hugging Face → #HuggingFace）."""
+    return re.sub(r"[^\w]", "", tag or "")
 
 
 def _ja_topic_tags(*texts: str, limit: int = 2) -> list[str]:
@@ -341,9 +348,24 @@ def generate_topic_shorts_metadata(
         article.get("summary_ja_long") or article.get("summary_ja", ""),
     )
 
-    # 題名のハッシュタグ: 固定4つ＋関連エンティティ1つ（あれば）: #ChatGPT #OpenAI 等
-    title_hashtags = ["ai", "news", "shorts", "short"] + ([entities[0]] if entities else [])
+    # 題名のハッシュタグ: 固定4つ＋関連タグ最大 youtube.title_extra_hashtags 個（既定2）。
+    # 関連タグは エンティティ → 日本語ジャンル語 の順（例: #ChatGPT #Google / #Siri #Apple）。
+    # ユーザーが Studio で手で足していた分の自動化（2026-11-06）。
+    # ジャンル語は題名と記事タイトルだけから拾う（要約まで見ると「医療資料」で #医療 等の的外れが出る）
+    n_extra = int(yt_cfg.get("title_extra_hashtags", 2))
+    related = entities + _ja_topic_tags(hook, article.get("title_ja", ""), limit=n_extra)
+    title_hashtags = ["ai", "news", "shorts", "short"]
+    seen = {h.lower() for h in title_hashtags}  # ハッシュタグは大文字小文字を区別しない（#AI = #ai）
+    for t in related:
+        t = _hashtag_safe(t)
+        if t and t.lower() not in seen and len(title_hashtags) < 4 + n_extra:
+            title_hashtags.append(t)
+            seen.add(t.lower())
     title = f"{hook} " + " ".join(f"#{h}" for h in title_hashtags)
+    # 100字を超えるときは関連タグを後ろから外す（固定4つは残す）
+    while len(title) > 100 and len(title_hashtags) > 4:
+        title_hashtags.pop()
+        title = f"{hook} " + " ".join(f"#{h}" for h in title_hashtags)
 
     summary = article.get("summary_ja_long") or article.get("summary_ja", "")
     if len(summary) > 280:
@@ -499,6 +521,9 @@ def upload_video(
     if playlist_name:
         _add_to_playlist(service, video_id, playlist_name)
 
+    # 設定が実際に入ったかを読み戻す（Studio で手確認していた項目）
+    readback = _readback_video(service, video_id)
+
     # アップロード結果を永続ログへ追記
     try:
         state_dir = Path(config["paths"]["state_dir"])
@@ -512,6 +537,7 @@ def upload_video(
             "playlist": playlist_name or "",
             "thumbnail_set": thumbnail_set,
             "caption_set": caption_set,
+            "readback": readback,
             "uploaded_at": datetime.now(timezone.utc).isoformat(),
         })
     except Exception as e:
@@ -603,6 +629,46 @@ def _news_json_path(state_dir: Path, date_str: str, topic: str = "") -> Path:
     return news_json_path(state_dir, date_str, topic)
 
 
+def make_topic_thumbnail(video_path: Path, out_path: Path, at_sec: float = 0.2) -> Path | None:
+    """動画の at_sec 秒の画面を JPEG（API上限 2MB 未満）で書き出す。失敗時は None（アップロードは続行）."""
+    import subprocess
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    for q in (2, 4, 7):  # 画質を少しずつ下げて 2MB 未満に収める
+        try:
+            subprocess.run(
+                ["ffmpeg", "-loglevel", "error", "-y", "-ss", str(at_sec), "-i", str(video_path),
+                 "-frames:v", "1", "-q:v", str(q), str(out_path)],
+                check=True, capture_output=True, timeout=60)
+        except Exception as e:
+            logger.warning("Thumbnail extraction failed (%s): %s", video_path.name, e)
+            return None
+        if out_path.exists() and out_path.stat().st_size < 2 * 1024 * 1024:
+            return out_path
+    logger.warning("Thumbnail over 2MB even at low quality (skipping): %s", out_path)
+    return None
+
+
+def _readback_video(service, video_id: str) -> dict:
+    """アップロード直後の設定を読み戻して記録する（言語・有料プロモーション・字幕トラック）."""
+    try:
+        v = service.videos().list(
+            part="snippet,paidProductPlacementDetails", id=video_id).execute()["items"][0]
+        tracks = service.captions().list(part="snippet", videoId=video_id).execute().get("items", [])
+        return {
+            "default_language": v["snippet"].get("defaultLanguage"),
+            "audio_language": v["snippet"].get("defaultAudioLanguage"),
+            "paid_product_placement": v.get("paidProductPlacementDetails", {}).get(
+                "hasPaidProductPlacement"),
+            "caption_tracks": [
+                {"language": t["snippet"].get("language"), "draft": t["snippet"].get("isDraft")}
+                for t in tracks if t["snippet"].get("trackKind") != "asr"],
+        }
+    except Exception as e:
+        logger.warning("Readback failed (upload still OK): %s", e)
+        return {"error": str(e)}
+
+
 def upload_topic_shorts(
     date_str: str,
     config_path: Path = Path("config.json"),
@@ -659,6 +725,14 @@ def upload_topic_shorts(
         hook = meta_articles[i - 1].get("hook_title", "") if i - 1 < len(meta_articles) else ""
         metadata = generate_topic_shorts_metadata(
             date_str, config, article, hook, i, topic=topic)
+        # サムネイル: 動画の最初の画面（記事の写真＋大見出し、字幕が出る前）。
+        # Studio で「1番左の候補」を手で選んでいた分の自動化（2026-11-06）
+        if config.get("youtube", {}).get("custom_thumbnail", False):
+            thumb = make_topic_thumbnail(
+                video_path, state_dir / "thumbnails" / f"{date_str}_topic{i}.jpg",
+                at_sec=float(config.get("youtube", {}).get("thumbnail_time_sec", 0.2)))
+            if thumb:
+                metadata["thumbnail"] = str(thumb)
         # 字幕（SRT）: video_builder.generate_topic_captions が生成していれば添付
         srt_path = state_dir / "captions" / f"{date_str}_topic{i}.srt"
         if srt_path.exists():
