@@ -111,13 +111,37 @@ _KNOWN_ENTITIES = {
     "qwen": "Qwen", "minimax": "MiniMax", "gemma": "Gemma", "veo": "Veo",
     "suno": "Suno", "huggingface": "HuggingFace", "groq": "Groq", "manus": "Manus",
     "wikipedia": "Wikipedia", "marvell": "Marvell", "bing": "Bing", "chrome": "Chrome",
+    "openrouter": "OpenRouter", "harvard": "Harvard", "stanford": "Stanford", "mit": "MIT",
 }
+
+# カタカナ・日本語で書かれた社名・サービス名 → 正規表記（2026-11-08 追加）。
+# 日本語メディアの記事では社名がカタカナだけのことが多く、関連タグが付かなかった
+# （ユーザーが Studio で #amazon #google #meta 等を手で足していた）。
+# 「メタ」はメタデータ等と衝突するため、区切り文字が続くときだけ社名とみなす。
+_JA_ENTITY_PATTERNS = [
+    (re.compile(r"アマゾン(?!川|の熱帯|の森)"), "Amazon"),
+    (re.compile(r"マイクロソフト"), "Microsoft"),
+    (re.compile(r"グーグル"), "Google"),
+    (re.compile(r"アルファベット(?!順|表記|の大文字|の小文字|26)"), "Google"),
+    (re.compile(r"アップル(?!パイ|ジュース|ソース|ティー)"), "Apple"),
+    (re.compile(r"メタ(?=[、,・（(社のがはとやも]|$)"), "Meta"),
+    (re.compile(r"エヌビディア"), "NVIDIA"),
+    (re.compile(r"オープンエーアイ"), "OpenAI"),
+    (re.compile(r"アン[ソス]ロピック"), "Anthropic"),
+    (re.compile(r"テスラ(?!コイル)"), "Tesla"),
+    (re.compile(r"ソフトバンク"), "ソフトバンク"),
+    (re.compile(r"ディープシーク"), "DeepSeek"),
+    (re.compile(r"オープンルーター"), "OpenRouter"),
+    (re.compile(r"ハーバード"), "Harvard"),
+    (re.compile(r"ウィキペディア"), "Wikipedia"),
+]
+_JA_ENTITY_MARK = "ja:"  # 照合リスト内でカタカナ由来の名前を区別する目印（英字トークンは ":" を含まない）
 
 # 日本語のジャンル語（タイトル・要約に含まれていたらtagsに追加）
 _JA_TOPIC_TAGS = [
     "生成AI", "画像生成", "動画生成", "AIエージェント", "自動運転", "ロボット",
     "スマートスピーカー", "音声認識", "半導体", "セキュリティ", "医療", "教育",
-    "AIモデル",
+    "AIモデル", "詐欺", "ハッキング", "翻訳", "動画編集",
 ]
 
 _ENTITY_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9\.\-]*")
@@ -139,8 +163,19 @@ def extract_entity_keywords(*texts: str, limit: int = 4) -> list[str]:
     LINEは常に全大文字表記のみ採用する。
     """
     joined = " ".join(t for t in texts if t)
+    # 英字トークンとカタカナ社名を、本文中に出てきた順にまとめて照合する
+    hits: list[tuple[int, str]] = [(m.start(), m.group(0)) for m in _ENTITY_TOKEN_RE.finditer(joined)]
+    hits += [(m.start(), _JA_ENTITY_MARK + name) for pat, name in _JA_ENTITY_PATTERNS for m in pat.finditer(joined)]
+    hits.sort(key=lambda h: h[0])
     found: list[str] = []
-    for token in _ENTITY_TOKEN_RE.findall(joined):
+    for _, token in hits:
+        if token.startswith(_JA_ENTITY_MARK):  # カタカナ社名（正規表記に変換済み）
+            name = token[len(_JA_ENTITY_MARK):]
+            if name not in found:
+                found.append(name)
+                if len(found) >= limit:
+                    break
+            continue
         bare = token.rstrip(".-")
         key = bare.lower()
         # LINE（メッセージアプリ）はブランド表記が常に全大文字
